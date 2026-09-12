@@ -208,6 +208,19 @@ body {
   outline-offset: 2px;
 }
 
+.note-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background:
+    linear-gradient(135deg, transparent 0 45%, rgba(0, 0, 0, 0.35) 45% 55%, transparent 55% 100%),
+    linear-gradient(135deg, transparent 0 65%, rgba(0, 0, 0, 0.35) 65% 75%, transparent 75% 100%);
+}
+
 /* ---------- Floating action button ---------- */
 .fab {
   position: absolute;
@@ -241,6 +254,11 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
+.color-popover[hidden],
+.font-popover[hidden] {
+  display: none;
+}
+
 .color-opt {
   width: 26px;
   height: 26px;
@@ -250,6 +268,32 @@ body {
   padding: 0;
 }
 .color-opt:hover { transform: scale(1.1); }
+
+/* ---------- Font popover ---------- */
+.font-popover {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.font-opt {
+  width: 34px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 0;
+}
+.font-opt:hover { background: #2a2f3a; }
 
 /* ---------- Zoom controls ---------- */
 .zoom-controls {

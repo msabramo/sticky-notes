@@ -11,9 +11,9 @@ import { DurableObject } from "cloudflare:workers";
  * Message shape (all fields besides `t` are opaque to the server -- it
  * just stores/relays whatever the client sends, tagging it with the
  * sender's connection id):
- *   create: { t: "create", id, x, y, w, h, color, text, rot, z }
+ *   create: { t: "create", id, x, y, w, h, color, text, font?, rot, z }
  *   move:   { t: "move", id, x, y, z }
- *   update: { t: "update", id, text?, color?, w?, h?, z? }
+ *   update: { t: "update", id, text?, color?, font?, w?, h?, z? }
  *   delete: { t: "delete", id }
  *   clear:  { t: "clear" }
  *   cursor: { t: "cursor", x, y, color }  (never persisted)

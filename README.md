@@ -39,7 +39,10 @@ same coordinate space, so notes always line up between devices.
   typing; only the header initiates a drag, so starting to type never
   fights with starting to drag.)
 - **Edit text** — tap/click the note's body.
+- **Resize a note** — drag the small grip in its bottom-right corner.
 - **Recolor** — tap the ● button in a note's header for a small palette.
+- **Change the font** — tap the **Aa** button in a note's header to pick
+  from a handful of font styles.
 - **Delete** — tap the × button in a note's header.
 - **Clear the board** — from the hamburger menu (☰, top right); wipes
   every note for everyone and can't be undone.
@@ -47,10 +50,10 @@ same coordinate space, so notes always line up between devices.
 - **Zoom** — pinch, scroll, or the +/− buttons; the ⤢ button fits
   everything on screen.
 
-Not in this pass: resizing notes, rich text, images/attachments,
-connectors between notes, and per-user identity (cursors are just
-colored blobs, chosen randomly per session) — natural next additions
-rather than being folded in here.
+Not in this pass: rich text, images/attachments, connectors between
+notes, and per-user identity (cursors are just colored blobs, chosen
+randomly per session) — natural next additions rather than being
+folded in here.
 
 ## Backend: Cloudflare Workers + Durable Objects
 

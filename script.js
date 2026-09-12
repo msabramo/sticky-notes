@@ -16,6 +16,7 @@
   const boardCodeEl = document.getElementById("boardCode");
   const connDot = document.getElementById("connDot");
   const colorPopover = document.getElementById("colorPopover");
+  const fontPopover = document.getElementById("fontPopover");
 
   const WORLD_W = 3000;
   const WORLD_H = 2000;
@@ -23,8 +24,19 @@
   const MAX_SCALE = 3;
   const NOTE_W = 180;
   const NOTE_H = 160;
+  const MIN_NOTE_W = 120;
+  const MIN_NOTE_H = 100;
+  const MAX_NOTE_W = 640;
+  const MAX_NOTE_H = 560;
   const COLORS = ["#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8"];
   const CURSOR_COLORS = ["#ff6b3d", "#4dd0e1", "#ff4d4f", "#8bc34a", "#ba68c8", "#ffd54f"];
+  const FONT_STACKS = {
+    sans: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`,
+    serif: `Georgia, "Times New Roman", serif`,
+    mono: `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`,
+    hand: `"Comic Sans MS", "Comic Sans", cursive`,
+    round: `"Trebuchet MS", "Segoe UI Rounded", sans-serif`,
+  };
 
   function clamp(v, lo, hi) {
     return Math.max(lo, Math.min(hi, v));
@@ -170,10 +182,15 @@
     const colorBtn = document.createElement("button");
     colorBtn.textContent = "●";
     colorBtn.title = "Color";
+    const fontBtn = document.createElement("button");
+    fontBtn.textContent = "Aa";
+    fontBtn.title = "Font";
+    fontBtn.style.fontSize = "10px";
     const delBtn = document.createElement("button");
     delBtn.textContent = "×";
     delBtn.title = "Delete";
     header.appendChild(colorBtn);
+    header.appendChild(fontBtn);
     header.appendChild(delBtn);
 
     const textarea = document.createElement("textarea");
@@ -181,14 +198,24 @@
     textarea.placeholder = "Type…";
     textarea.value = note.text || "";
     textarea.spellcheck = false;
+    if (note.font && FONT_STACKS[note.font]) textarea.style.fontFamily = FONT_STACKS[note.font];
+
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "note-resize";
+    resizeHandle.title = "Drag to resize";
 
     el.appendChild(header);
     el.appendChild(textarea);
+    el.appendChild(resizeHandle);
     world.insertBefore(el, cursorsEl);
 
     colorBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       openColorPopover(note.id, colorBtn);
+    });
+    fontBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openFontPopover(note.id, fontBtn);
     });
     delBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -258,6 +285,7 @@
     }
     selectedId = null;
     closeColorPopover();
+    closeFontPopover();
   }
 
   function bringToFront(id) {
@@ -278,6 +306,15 @@
     MP.sendUpdate(id, { color });
   }
 
+  function setNoteFont(id, font) {
+    const note = notes.get(id);
+    if (!note || !FONT_STACKS[font]) return;
+    note.font = font;
+    const refs = noteEls.get(id);
+    if (refs) refs.textarea.style.fontFamily = FONT_STACKS[font];
+    MP.sendUpdate(id, { font });
+  }
+
   function sendTextUpdate(id) {
     const note = notes.get(id);
     if (!note) return;
@@ -296,6 +333,9 @@
         refs.textarea.value = data.text;
       }
       if (data.color) refs.el.style.background = data.color;
+      if (data.font && FONT_STACKS[data.font]) refs.textarea.style.fontFamily = FONT_STACKS[data.font];
+      if (typeof data.w === "number") refs.el.style.width = data.w + "px";
+      if (typeof data.h === "number") refs.el.style.height = data.h + "px";
     }
     positionNoteEl(data.id);
     zCounter = Math.max(zCounter, note.z || 0);
@@ -305,6 +345,7 @@
   let colorTargetId = null;
   function openColorPopover(id, anchorEl) {
     if (!colorPopover.hidden && colorTargetId === id) { closeColorPopover(); return; }
+    closeFontPopover();
     colorTargetId = id;
     const anchorRect = anchorEl.getBoundingClientRect();
     const wrapRect = boardWrap.getBoundingClientRect();
@@ -321,6 +362,29 @@
     if (!btn || !colorTargetId) return;
     setNoteColor(colorTargetId, btn.dataset.color);
     closeColorPopover();
+  });
+
+  // ---------- Font popover ----------
+  let fontTargetId = null;
+  function openFontPopover(id, anchorEl) {
+    if (!fontPopover.hidden && fontTargetId === id) { closeFontPopover(); return; }
+    closeColorPopover();
+    fontTargetId = id;
+    const anchorRect = anchorEl.getBoundingClientRect();
+    const wrapRect = boardWrap.getBoundingClientRect();
+    fontPopover.style.left = clamp(anchorRect.left - wrapRect.left, 4, wrapRect.width - 220) + "px";
+    fontPopover.style.top = clamp(anchorRect.bottom - wrapRect.top + 6, 4, wrapRect.height - 50) + "px";
+    fontPopover.hidden = false;
+  }
+  function closeFontPopover() {
+    fontPopover.hidden = true;
+    fontTargetId = null;
+  }
+  fontPopover.addEventListener("click", (e) => {
+    const btn = e.target.closest(".font-opt");
+    if (!btn || !fontTargetId) return;
+    setNoteFont(fontTargetId, btn.dataset.font);
+    closeFontPopover();
   });
 
   // ---------- Adding notes ----------
@@ -362,7 +426,7 @@
 
   // ---------- Pointer input: pan / drag note / pinch ----------
   const isUiChrome = (target) =>
-    !!target.closest(".fab, .zoom-controls, .menu-btn, .menu-drawer, .menu-backdrop, .color-popover");
+    !!target.closest(".fab, .zoom-controls, .menu-btn, .menu-drawer, .menu-backdrop, .color-popover, .font-popover");
 
   const activePointers = new Map(); // pointerId -> {x,y}
   let pinch = null;
@@ -372,6 +436,9 @@
   let dragNoteId = null;
   let dragOffset = null;
   let lastMoveSent = 0;
+  let resizePointerId = null;
+  let resizeNoteId = null;
+  let resizeStart = null;
 
   function pointDist(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);
@@ -404,6 +471,9 @@
     dragOffset = null;
     panPointerId = null;
     panAnchorWorld = null;
+    resizeNoteId = null;
+    resizePointerId = null;
+    resizeStart = null;
   }
 
   boardWrap.addEventListener("pointerdown", (e) => {
@@ -428,6 +498,21 @@
       dragOffset = { x: world.x - note.x, y: world.y - note.y };
       dragNoteId = id;
       dragPointerId = e.pointerId;
+      e.preventDefault();
+      return;
+    }
+
+    const resizeEl = e.target.closest(".note-resize");
+    if (resizeEl) {
+      const noteEl = resizeEl.closest(".note");
+      const id = noteEl.dataset.id;
+      const note = notes.get(id);
+      if (!note) return;
+      selectNote(id);
+      const world = screenToWorld(e.clientX, e.clientY);
+      resizeStart = { worldX: world.x, worldY: world.y, w: note.w, h: note.h };
+      resizeNoteId = id;
+      resizePointerId = e.pointerId;
       e.preventDefault();
       return;
     }
@@ -463,6 +548,25 @@
       return;
     }
 
+    if (resizeNoteId && e.pointerId === resizePointerId) {
+      const note = notes.get(resizeNoteId);
+      if (!note) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      note.w = clamp(resizeStart.w + (world.x - resizeStart.worldX), MIN_NOTE_W, MAX_NOTE_W);
+      note.h = clamp(resizeStart.h + (world.y - resizeStart.worldY), MIN_NOTE_H, MAX_NOTE_H);
+      const refs = noteEls.get(resizeNoteId);
+      if (refs) {
+        refs.el.style.width = note.w + "px";
+        refs.el.style.height = note.h + "px";
+      }
+      const now = performance.now();
+      if (now - lastMoveSent > 60) {
+        MP.sendUpdate(resizeNoteId, { w: Math.round(note.w), h: Math.round(note.h) });
+        lastMoveSent = now;
+      }
+      return;
+    }
+
     if (panPointerId === e.pointerId && panAnchorWorld) {
       const rect = boardWrap.getBoundingClientRect();
       camera.x = panAnchorWorld.x - (e.clientX - rect.left) / camera.scale;
@@ -487,6 +591,13 @@
       dragNoteId = null;
       dragPointerId = null;
       dragOffset = null;
+    }
+    if (resizeNoteId && e.pointerId === resizePointerId) {
+      const note = notes.get(resizeNoteId);
+      if (note) MP.sendUpdate(resizeNoteId, { w: Math.round(note.w), h: Math.round(note.h) });
+      resizeNoteId = null;
+      resizePointerId = null;
+      resizeStart = null;
     }
     if (panPointerId === e.pointerId) {
       panPointerId = null;
