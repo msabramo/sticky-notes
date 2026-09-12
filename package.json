@@ -1,0 +1,14 @@
+{
+  "name": "sticky-notes",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A live, multiplayer shared sticky-note board — Cloudflare Workers + Durable Objects backend for realtime sync.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260911.1",
+    "wrangler": "^4.131.1"
+  }
+}

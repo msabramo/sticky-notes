@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- After `npm run deploy` (see README.md), replace this with the host
+       it prints, e.g. sticky-notes.YOUR-SUBDOMAIN.workers.dev -->
+  <meta name="worker-host" content="sticky-notes.YOUR-SUBDOMAIN.workers.dev" />
+  <title>Sticky Notes</title>
+  <link rel="stylesheet" href="style.css?v=1" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1>🗒️ Sticky Notes</h1>
+      <span class="conn-dot connecting" id="connDot" title="Connecting…"></span>
+      <button id="menuBtn" class="menu-btn" title="Menu" aria-label="Menu">☰</button>
+    </header>
+
+    <main class="board-wrap" id="boardWrap">
+      <div class="world" id="world">
+        <div class="cursors" id="cursors"></div>
+      </div>
+
+      <button class="fab" id="addNoteBtn" title="Add a sticky note">+</button>
+
+      <div class="zoom-controls no-print">
+        <button id="zoomInBtn" class="zoom-btn" title="Zoom in">+</button>
+        <button id="zoomOutBtn" class="zoom-btn" title="Zoom out">−</button>
+        <button id="fitBtn" class="zoom-btn" title="Fit everything on screen">⤢</button>
+      </div>
+    </main>
+  </div>
+
+  <div class="menu-backdrop no-print" id="menuBackdrop"></div>
+  <aside class="menu-drawer no-print" id="menuDrawer">
+    <div class="menu-section">
+      <span class="room-label">Board <b id="boardCode">------</b></span>
+      <button id="copyLinkBtn" class="btn">🔗 Copy Invite Link</button>
+    </div>
+    <div class="menu-divider"></div>
+    <div class="menu-section actions">
+      <button id="clearBtn" class="btn danger">🗑 Clear Board</button>
+      <a href="?" id="newBoardLink" class="btn">✨ Start a New Board</a>
+    </div>
+    <div class="menu-divider"></div>
+    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
+  </aside>
+
+  <div class="color-popover" id="colorPopover" hidden>
+    <button class="color-opt" data-color="#fff59d" style="background:#fff59d"></button>
+    <button class="color-opt" data-color="#ffab91" style="background:#ffab91"></button>
+    <button class="color-opt" data-color="#f48fb1" style="background:#f48fb1"></button>
+    <button class="color-opt" data-color="#a5d6a7" style="background:#a5d6a7"></button>
+    <button class="color-opt" data-color="#90caf9" style="background:#90caf9"></button>
+    <button class="color-opt" data-color="#ce93d8" style="background:#ce93d8"></button>
+  </div>
+
+  <script src="script.js?v=1"></script>
+</body>
+</html>
