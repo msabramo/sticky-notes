@@ -104,6 +104,12 @@ so it can reach `ws://127.0.0.1:8787`.
 4. Host the three static files (`index.html`, `style.css`, `script.js`)
    anywhere — GitHub Pages, Cloudflare Pages, S3, your own server. No
    build step required.
+5. Whenever you redeploy after changing `style.css` or `script.js`,
+   bump the `?v=N` query string on their `<link>`/`<script>` tags in
+   `index.html`. Browsers and CDNs cache those files by URL, so without
+   a new version number some visitors keep getting old, possibly
+   mismatched copies (e.g. a cached `script.js` referencing markup a
+   newer `index.html` no longer has) until their cache happens to expire.
 
 ## Known limitations
 
