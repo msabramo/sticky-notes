@@ -254,6 +254,17 @@ body {
 }
 .fab:hover { filter: brightness(1.08); }
 .fab:active { transform: scale(0.94); }
+.fab:disabled { opacity: 0.6; cursor: default; transform: none; filter: none; }
+
+.fab-secondary {
+  left: 16px;
+  bottom: 80px;
+  width: 44px;
+  height: 44px;
+  font-size: 20px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
 
 /* ---------- Color popover ---------- */
 .color-popover {
@@ -414,4 +425,5 @@ body {
 
 @media (max-width: 480px) {
   .fab { width: 46px; height: 46px; font-size: 24px; }
+  .fab-secondary { width: 40px; height: 40px; font-size: 18px; bottom: 70px; }
 }
