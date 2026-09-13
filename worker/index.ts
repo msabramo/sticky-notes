@@ -11,9 +11,14 @@ import { DurableObject } from "cloudflare:workers";
  * Message shape (all fields besides `t` are opaque to the server -- it
  * just stores/relays whatever the client sends, tagging it with the
  * sender's connection id):
- *   create: { t: "create", id, x, y, w, h, color, text, rot, z }
+ *   create: { t: "create", id, x, y, w, h, color, html, rot, z }
  *   move:   { t: "move", id, x, y, z }
- *   update: { t: "update", id, text?, color?, w?, h?, z? }
+ *   update: { t: "update", id, html?, color?, w?, h?, z? }
+ *
+ * `html` is rich text (bold/italic/underline, headings, fonts, sizes) as a
+ * limited HTML subset. The server relays it unmodified -- each client is
+ * responsible for sanitizing any HTML it renders from a peer, since this
+ * server applies no validation of its own.
  *   delete: { t: "delete", id }
  *   clear:  { t: "clear" }
  *   cursor: { t: "cursor", x, y, color }  (never persisted)

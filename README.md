@@ -18,12 +18,23 @@ together in real time — no accounts, no sign-up.
 ## Frontend
 
 Plain HTML/CSS/JavaScript, no build step, no framework — `index.html`,
-`style.css`, `script.js`. Notes are real DOM elements (a `<textarea>`
-inside a positioned `<div>`), not canvas pixels — that keeps text
+`style.css`, `script.js`. Notes are real DOM elements (a `contenteditable`
+`<div>` inside a positioned `<div>`), not canvas pixels — that keeps text
 editing, hit-testing, and styling simple, and sidesteps the whole class
 of canvas-backing-store quirks (size limits, `willReadFrequently`
 forcing software rendering, etc.) that a pixel-based board would run
 into on some mobile browsers.
+
+A note's content is a small, allowlisted subset of HTML (bold/italic/
+underline, headings, `<span>`s carrying only font-family/font-size/
+font-weight/font-style/text-decoration) rather than plain text, so a
+note can mix a bold heading with regular, italic, and differently-sized
+or -fonted text in one body. Because the realtime server relays
+whatever any peer sends without validating it, every client runs
+incoming HTML (from a live peer update *and* from a board's stored
+history) through an allowlist sanitizer before ever assigning it to
+`innerHTML` — otherwise one malicious peer could run script in every
+other viewer's tab just by joining the board.
 
 The board lives on a fixed-size "world" area (3000×2000 CSS px)
 independent of anyone's window size, panned/zoomed via a CSS `transform`
@@ -39,7 +50,12 @@ same coordinate space, so notes always line up between devices.
   typing; only the header initiates a drag, so starting to type never
   fights with starting to drag.)
 - **Edit text** — tap/click the note's body.
+- **Resize a note** — drag the small grip in its bottom-right corner.
 - **Recolor** — tap the ● button in a note's header for a small palette.
+- **Format text** — select some text and tap the **Aa** button in a
+  note's header for bold/italic/underline, headings, a font picker
+  (a real list of named fonts, not just five presets), and font size.
+  With nothing selected, a change applies to the whole note.
 - **Delete** — tap the × button in a note's header.
 - **Clear the board** — from the hamburger menu (☰, top right); wipes
   every note for everyone and can't be undone.
@@ -47,10 +63,9 @@ same coordinate space, so notes always line up between devices.
 - **Zoom** — pinch, scroll, or the +/− buttons; the ⤢ button fits
   everything on screen.
 
-Not in this pass: resizing notes, rich text, images/attachments,
-connectors between notes, and per-user identity (cursors are just
-colored blobs, chosen randomly per session) — natural next additions
-rather than being folded in here.
+Not in this pass: images/attachments, connectors between notes, and
+per-user identity (cursors are just colored blobs, chosen randomly per
+session) — natural next additions rather than being folded in here.
 
 ## Backend: Cloudflare Workers + Durable Objects
 
@@ -89,6 +104,12 @@ so it can reach `ws://127.0.0.1:8787`.
 4. Host the three static files (`index.html`, `style.css`, `script.js`)
    anywhere — GitHub Pages, Cloudflare Pages, S3, your own server. No
    build step required.
+5. Whenever you redeploy after changing `style.css` or `script.js`,
+   bump the `?v=N` query string on their `<link>`/`<script>` tags in
+   `index.html`. Browsers and CDNs cache those files by URL, so without
+   a new version number some visitors keep getting old, possibly
+   mismatched copies (e.g. a cached `script.js` referencing markup a
+   newer `index.html` no longer has) until their cache happens to expire.
 
 ## Known limitations
 
