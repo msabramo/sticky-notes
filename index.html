@@ -29,6 +29,36 @@
         <button id="zoomOutBtn" class="zoom-btn" title="Zoom out">−</button>
         <button id="fitBtn" class="zoom-btn" title="Fit everything on screen">⤢</button>
       </div>
+
+      <!-- Positioned relative to #boardWrap (position:relative), matching the
+           left/top math in script.js -- these must stay inside board-wrap,
+           not become siblings of .app, or that math silently goes off by
+           the topbar's height. -->
+      <div class="color-popover" id="colorPopover" hidden>
+        <button class="color-opt" data-color="#fff59d" style="background:#fff59d"></button>
+        <button class="color-opt" data-color="#ffab91" style="background:#ffab91"></button>
+        <button class="color-opt" data-color="#f48fb1" style="background:#f48fb1"></button>
+        <button class="color-opt" data-color="#a5d6a7" style="background:#a5d6a7"></button>
+        <button class="color-opt" data-color="#90caf9" style="background:#90caf9"></button>
+        <button class="color-opt" data-color="#ce93d8" style="background:#ce93d8"></button>
+      </div>
+
+      <div class="format-toolbar" id="formatToolbar" hidden>
+        <div class="format-row">
+          <button type="button" class="format-btn" id="fmtBoldBtn" title="Bold"><b>B</b></button>
+          <button type="button" class="format-btn" id="fmtItalicBtn" title="Italic"><i>I</i></button>
+          <button type="button" class="format-btn" id="fmtUnderlineBtn" title="Underline"><u>U</u></button>
+          <select class="format-select" id="fmtHeadingSelect" title="Text style">
+            <option value="P">Normal</option>
+            <option value="H2">Heading</option>
+            <option value="H3">Subheading</option>
+          </select>
+        </div>
+        <div class="format-row">
+          <select class="format-select format-select-wide" id="fmtFontSelect" title="Font"></select>
+          <select class="format-select" id="fmtSizeSelect" title="Size"></select>
+        </div>
+      </div>
     </main>
   </div>
 
@@ -44,25 +74,8 @@
       <a href="?" id="newBoardLink" class="btn">✨ Start a New Board</a>
     </div>
     <div class="menu-divider"></div>
-    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the header buttons to change its color or font. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
+    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, and size — select some text first to format just that part. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
   </aside>
-
-  <div class="color-popover" id="colorPopover" hidden>
-    <button class="color-opt" data-color="#fff59d" style="background:#fff59d"></button>
-    <button class="color-opt" data-color="#ffab91" style="background:#ffab91"></button>
-    <button class="color-opt" data-color="#f48fb1" style="background:#f48fb1"></button>
-    <button class="color-opt" data-color="#a5d6a7" style="background:#a5d6a7"></button>
-    <button class="color-opt" data-color="#90caf9" style="background:#90caf9"></button>
-    <button class="color-opt" data-color="#ce93d8" style="background:#ce93d8"></button>
-  </div>
-
-  <div class="font-popover" id="fontPopover" hidden>
-    <button class="font-opt" data-font="sans" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" title="Sans-serif">Aa</button>
-    <button class="font-opt" data-font="serif" style="font-family:Georgia,'Times New Roman',serif" title="Serif">Aa</button>
-    <button class="font-opt" data-font="mono" style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" title="Monospace">Aa</button>
-    <button class="font-opt" data-font="hand" style="font-family:'Comic Sans MS','Comic Sans',cursive" title="Handwritten">Aa</button>
-    <button class="font-opt" data-font="round" style="font-family:'Trebuchet MS','Segoe UI Rounded',sans-serif" title="Rounded">Aa</button>
-  </div>
 
   <script src="script.js?v=1"></script>
 </body>

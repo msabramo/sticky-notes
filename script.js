@@ -16,7 +16,13 @@
   const boardCodeEl = document.getElementById("boardCode");
   const connDot = document.getElementById("connDot");
   const colorPopover = document.getElementById("colorPopover");
-  const fontPopover = document.getElementById("fontPopover");
+  const formatToolbar = document.getElementById("formatToolbar");
+  const fmtBoldBtn = document.getElementById("fmtBoldBtn");
+  const fmtItalicBtn = document.getElementById("fmtItalicBtn");
+  const fmtUnderlineBtn = document.getElementById("fmtUnderlineBtn");
+  const fmtHeadingSelect = document.getElementById("fmtHeadingSelect");
+  const fmtFontSelect = document.getElementById("fmtFontSelect");
+  const fmtSizeSelect = document.getElementById("fmtSizeSelect");
 
   const WORLD_W = 3000;
   const WORLD_H = 2000;
@@ -30,13 +36,104 @@
   const MAX_NOTE_H = 560;
   const COLORS = ["#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8"];
   const CURSOR_COLORS = ["#ff6b3d", "#4dd0e1", "#ff4d4f", "#8bc34a", "#ba68c8", "#ffd54f"];
-  const FONT_STACKS = {
-    sans: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`,
-    serif: `Georgia, "Times New Roman", serif`,
-    mono: `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`,
-    hand: `"Comic Sans MS", "Comic Sans", cursive`,
-    round: `"Trebuchet MS", "Segoe UI Rounded", sans-serif`,
-  };
+
+  // Real font names, mapped to a stack with sensible cross-platform fallbacks.
+  // Also doubles as the allowlist the HTML sanitizer checks font-family values against.
+  const FONT_OPTIONS = [
+    { label: "System Sans", value: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif` },
+    { label: "Arial", value: `Arial, Helvetica, sans-serif` },
+    { label: "Helvetica", value: `Helvetica, Arial, sans-serif` },
+    { label: "Verdana", value: `Verdana, Geneva, sans-serif` },
+    { label: "Tahoma", value: `Tahoma, Geneva, sans-serif` },
+    { label: "Trebuchet MS", value: `"Trebuchet MS", sans-serif` },
+    { label: "Georgia", value: `Georgia, "Times New Roman", serif` },
+    { label: "Times New Roman", value: `"Times New Roman", Times, serif` },
+    { label: "Garamond", value: `Garamond, Baskerville, serif` },
+    { label: "Courier New", value: `"Courier New", Courier, monospace` },
+    { label: "Consolas", value: `Consolas, "SF Mono", monospace` },
+    { label: "Comic Sans MS", value: `"Comic Sans MS", "Comic Sans", cursive` },
+    { label: "Brush Script", value: `"Brush Script MT", cursive` },
+    { label: "Impact", value: `Impact, Haettenschweiler, sans-serif` },
+    { label: "Papyrus", value: `Papyrus, fantasy` },
+  ];
+  const FONT_FAMILY_ALLOW = new Set(FONT_OPTIONS.map((f) => f.value));
+  const SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
+  const DEFAULT_FONT_SIZE = 14;
+
+  // ---------- HTML sanitizer ----------
+  // Notes are rendered as rich HTML (contenteditable), and that HTML is relayed
+  // verbatim to every other peer on the board by a Durable Object that doesn't
+  // validate anything -- so any HTML from a remote peer (or from a board's
+  // stored history) must be sanitized before it's ever assigned to innerHTML,
+  // otherwise one malicious peer could run script in every other viewer's tab.
+  const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "SPAN", "BR", "DIV", "H1", "H2", "H3", "P"]);
+  const DROP_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "IMG", "SVG", "TEMPLATE"]);
+  const FONT_SIZE_RE = /^(1[0-9]|[2-9][0-9]|1[0-4][0-9])px$/;
+  const FONT_WEIGHT_RE = /^(bold|normal|[1-9]00)$/;
+  const FONT_STYLE_RE = /^(italic|normal)$/;
+  const TEXT_DECORATION_RE = /^(underline|none)$/;
+
+  function sanitizeStyle(styleText) {
+    const out = [];
+    for (const decl of styleText.split(";")) {
+      const idx = decl.indexOf(":");
+      if (idx < 0) continue;
+      const prop = decl.slice(0, idx).trim().toLowerCase();
+      const value = decl.slice(idx + 1).trim();
+      if (prop === "font-family" && FONT_FAMILY_ALLOW.has(value)) out.push(`font-family:${value}`);
+      else if (prop === "font-size" && FONT_SIZE_RE.test(value)) out.push(`font-size:${value}`);
+      else if (prop === "font-weight" && FONT_WEIGHT_RE.test(value)) out.push(`font-weight:${value}`);
+      else if (prop === "font-style" && FONT_STYLE_RE.test(value)) out.push(`font-style:${value}`);
+      else if (prop === "text-decoration" && TEXT_DECORATION_RE.test(value)) out.push(`text-decoration:${value}`);
+    }
+    return out.join(";");
+  }
+
+  function sanitizeWalk(parent) {
+    let node = parent.firstChild;
+    while (node) {
+      const next = node.nextSibling;
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const tag = node.tagName;
+        if (DROP_TAGS.has(tag)) {
+          node.remove();
+        } else if (!ALLOWED_TAGS.has(tag)) {
+          sanitizeWalk(node);
+          while (node.firstChild) parent.insertBefore(node.firstChild, node);
+          parent.removeChild(node);
+        } else {
+          const styleAttr = node.getAttribute("style");
+          for (const attr of [...node.attributes]) node.removeAttribute(attr.name);
+          if (styleAttr) {
+            const clean = sanitizeStyle(styleAttr);
+            if (clean) node.setAttribute("style", clean);
+          }
+          sanitizeWalk(node);
+        }
+      } else if (node.nodeType !== Node.TEXT_NODE) {
+        node.remove();
+      }
+      node = next;
+    }
+  }
+
+  function sanitizeHtml(html) {
+    if (typeof html !== "string") return "";
+    // A <template>'s content is an inert document fragment -- parsing untrusted
+    // HTML into it never executes scripts or loads images, unlike a live div.
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    sanitizeWalk(template.content);
+    return template.innerHTML;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function legacyTextToHtml(text) {
+    return escapeHtml(text).replace(/\n/g, "<br>");
+  }
 
   function clamp(v, lo, hi) {
     return Math.max(lo, Math.min(hi, v));
@@ -45,6 +142,21 @@
   function makeId() {
     // Avoids crypto.randomUUID for wider WebKit/webview compatibility.
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+  }
+
+  for (const { label, value } of FONT_OPTIONS) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    opt.style.fontFamily = value;
+    fmtFontSelect.appendChild(opt);
+  }
+  for (const px of SIZE_OPTIONS) {
+    const opt = document.createElement("option");
+    opt.value = String(px);
+    opt.textContent = px + "px";
+    if (px === DEFAULT_FONT_SIZE) opt.selected = true;
+    fmtSizeSelect.appendChild(opt);
   }
 
   // ---------- Camera (pan/zoom) ----------
@@ -164,10 +276,16 @@
   });
 
   // ---------- Notes state ----------
-  const notes = new Map(); // id -> {id,x,y,w,h,color,text,rot,z}
-  const noteEls = new Map(); // id -> {el, header, textarea, colorBtn}
+  const notes = new Map(); // id -> {id,x,y,w,h,color,html,rot,z}
+  const noteEls = new Map(); // id -> {el, header, editor, colorBtn}
   let zCounter = Date.now();
   let selectedId = null;
+
+  function initialNoteHtml(note) {
+    if (typeof note.html === "string") return sanitizeHtml(note.html);
+    if (typeof note.text === "string") return legacyTextToHtml(note.text); // pre-rich-text notes
+    return "";
+  }
 
   function createNoteElement(note) {
     const el = document.createElement("div");
@@ -184,7 +302,7 @@
     colorBtn.title = "Color";
     const fontBtn = document.createElement("button");
     fontBtn.textContent = "Aa";
-    fontBtn.title = "Font";
+    fontBtn.title = "Format text";
     fontBtn.style.fontSize = "10px";
     const delBtn = document.createElement("button");
     delBtn.textContent = "×";
@@ -193,29 +311,29 @@
     header.appendChild(fontBtn);
     header.appendChild(delBtn);
 
-    const textarea = document.createElement("textarea");
-    textarea.className = "note-text";
-    textarea.placeholder = "Type…";
-    textarea.value = note.text || "";
-    textarea.spellcheck = false;
-    if (note.font && FONT_STACKS[note.font]) textarea.style.fontFamily = FONT_STACKS[note.font];
+    const editor = document.createElement("div");
+    editor.className = "note-text";
+    editor.contentEditable = "true";
+    editor.dataset.placeholder = "Type…";
+    editor.spellcheck = false;
+    editor.innerHTML = initialNoteHtml(note);
 
     const resizeHandle = document.createElement("div");
     resizeHandle.className = "note-resize";
     resizeHandle.title = "Drag to resize";
 
     el.appendChild(header);
-    el.appendChild(textarea);
+    el.appendChild(editor);
     el.appendChild(resizeHandle);
     world.insertBefore(el, cursorsEl);
 
     colorBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      openColorPopover(note.id, colorBtn);
+      openColorPopover(note.id);
     });
     fontBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      openFontPopover(note.id, fontBtn);
+      openFormatToolbar(note.id);
     });
     delBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -224,20 +342,25 @@
     });
 
     let debounceTimer = null;
-    textarea.addEventListener("focus", () => selectNote(note.id));
-    textarea.addEventListener("input", () => {
-      const n = notes.get(note.id);
-      if (!n) return;
-      n.text = textarea.value;
+    editor.addEventListener("focus", () => selectNote(note.id));
+    editor.addEventListener("input", () => {
+      // Chrome leaves a stray <br> behind when the last character is deleted;
+      // normalize that back to empty so the CSS placeholder shows again.
+      if (editor.innerHTML === "<br>") editor.innerHTML = "";
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => sendTextUpdate(note.id), 400);
+      debounceTimer = setTimeout(() => sendHtmlUpdate(note.id), 400);
     });
-    textarea.addEventListener("blur", () => {
+    editor.addEventListener("blur", () => {
       if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
-      sendTextUpdate(note.id);
+      sendHtmlUpdate(note.id);
+    });
+    editor.addEventListener("paste", (e) => {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData("text/plain");
+      document.execCommand("insertText", false, text);
     });
 
-    noteEls.set(note.id, { el, header, textarea, colorBtn });
+    noteEls.set(note.id, { el, header, editor, colorBtn });
     return el;
   }
 
@@ -285,7 +408,7 @@
     }
     selectedId = null;
     closeColorPopover();
-    closeFontPopover();
+    closeFormatToolbar();
   }
 
   function bringToFront(id) {
@@ -306,19 +429,18 @@
     MP.sendUpdate(id, { color });
   }
 
-  function setNoteFont(id, font) {
+  function sendHtmlUpdate(id) {
     const note = notes.get(id);
-    if (!note || !FONT_STACKS[font]) return;
-    note.font = font;
     const refs = noteEls.get(id);
-    if (refs) refs.textarea.style.fontFamily = FONT_STACKS[font];
-    MP.sendUpdate(id, { font });
-  }
-
-  function sendTextUpdate(id) {
-    const note = notes.get(id);
-    if (!note) return;
-    MP.sendUpdate(id, { text: note.text });
+    if (!note || !refs) return;
+    // Sanitize what gets stored/broadcast, but never rewrite the live editor's
+    // DOM here: it's already safe (paste is plain-text-only; everything else
+    // comes from our own execCommand output), and replacing nodes mid-edit
+    // would invalidate whatever selection a chained toolbar command needs next.
+    const html = sanitizeHtml(refs.editor.innerHTML);
+    note.html = html;
+    delete note.text;
+    MP.sendUpdate(id, { html });
   }
 
   function applyRemoteNote(data) {
@@ -327,13 +449,22 @@
     Object.assign(note, data);
     delete note.t;
     delete note.from;
+    // Sanitize immediately, regardless of whether the DOM gets touched below --
+    // note.html must never hold a peer's raw HTML, even transiently, since a
+    // later code path could end up rendering it as-is.
+    const remoteHtml = typeof data.html === "string" ? sanitizeHtml(data.html)
+      : typeof data.text === "string" ? legacyTextToHtml(data.text)
+      : null;
+    if (remoteHtml !== null) {
+      note.html = remoteHtml;
+      delete note.text;
+    }
     const refs = noteEls.get(data.id);
     if (refs) {
-      if (typeof data.text === "string" && document.activeElement !== refs.textarea) {
-        refs.textarea.value = data.text;
+      if (remoteHtml !== null && document.activeElement !== refs.editor) {
+        refs.editor.innerHTML = remoteHtml;
       }
       if (data.color) refs.el.style.background = data.color;
-      if (data.font && FONT_STACKS[data.font]) refs.textarea.style.fontFamily = FONT_STACKS[data.font];
       if (typeof data.w === "number") refs.el.style.width = data.w + "px";
       if (typeof data.h === "number") refs.el.style.height = data.h + "px";
     }
@@ -341,17 +472,52 @@
     zCounter = Math.max(zCounter, note.z || 0);
   }
 
+  const NOTE_HEADER_H = 20; // px, must match .note-header's CSS height
+
+  // A note's DOM element is rotated a few degrees for the sticky-note look,
+  // so anchorEl.getBoundingClientRect() on a header button returns the
+  // *rotated* axis-aligned bounding box -- visibly larger than the header's
+  // true 20px height. Computing the header's screen rect from the note's own
+  // (unrotated) world position instead sidesteps that skew entirely.
+  function noteHeaderScreenRect(id) {
+    const note = notes.get(id);
+    const wrapRect = boardWrap.getBoundingClientRect();
+    const left = wrapRect.left + (note.x - camera.x) * camera.scale;
+    const top = wrapRect.top + (note.y - camera.y) * camera.scale;
+    return {
+      left,
+      top,
+      right: left + note.w * camera.scale,
+      bottom: top + NOTE_HEADER_H * camera.scale,
+    };
+  }
+
+  // Positions a popover under a note's header, flipping above it instead of
+  // clamping in place when there isn't room below -- clamping alone can push
+  // a tall popover (the format toolbar) up far enough to overlap the very
+  // button row it was opened from.
+  function positionPopoverNear(popoverEl, id) {
+    popoverEl.hidden = false; // must be visible/laid out to measure
+    const { width, height } = popoverEl.getBoundingClientRect();
+    const anchorRect = noteHeaderScreenRect(id);
+    const wrapRect = boardWrap.getBoundingClientRect();
+    const left = clamp(anchorRect.left - wrapRect.left, 4, wrapRect.width - width - 4);
+    const spaceBelow = wrapRect.height - (anchorRect.bottom - wrapRect.top);
+    const top =
+      spaceBelow >= height + 6
+        ? anchorRect.bottom - wrapRect.top + 6
+        : clamp(anchorRect.top - wrapRect.top - height - 6, 4, wrapRect.height - height - 4);
+    popoverEl.style.left = left + "px";
+    popoverEl.style.top = top + "px";
+  }
+
   // ---------- Color popover ----------
   let colorTargetId = null;
-  function openColorPopover(id, anchorEl) {
+  function openColorPopover(id) {
     if (!colorPopover.hidden && colorTargetId === id) { closeColorPopover(); return; }
-    closeFontPopover();
+    closeFormatToolbar();
     colorTargetId = id;
-    const anchorRect = anchorEl.getBoundingClientRect();
-    const wrapRect = boardWrap.getBoundingClientRect();
-    colorPopover.style.left = clamp(anchorRect.left - wrapRect.left, 4, wrapRect.width - 190) + "px";
-    colorPopover.style.top = clamp(anchorRect.bottom - wrapRect.top + 6, 4, wrapRect.height - 50) + "px";
-    colorPopover.hidden = false;
+    positionPopoverNear(colorPopover, id);
   }
   function closeColorPopover() {
     colorPopover.hidden = true;
@@ -364,28 +530,145 @@
     closeColorPopover();
   });
 
-  // ---------- Font popover ----------
-  let fontTargetId = null;
-  function openFontPopover(id, anchorEl) {
-    if (!fontPopover.hidden && fontTargetId === id) { closeFontPopover(); return; }
-    closeColorPopover();
-    fontTargetId = id;
-    const anchorRect = anchorEl.getBoundingClientRect();
-    const wrapRect = boardWrap.getBoundingClientRect();
-    fontPopover.style.left = clamp(anchorRect.left - wrapRect.left, 4, wrapRect.width - 220) + "px";
-    fontPopover.style.top = clamp(anchorRect.bottom - wrapRect.top + 6, 4, wrapRect.height - 50) + "px";
-    fontPopover.hidden = false;
-  }
-  function closeFontPopover() {
-    fontPopover.hidden = true;
-    fontTargetId = null;
-  }
-  fontPopover.addEventListener("click", (e) => {
-    const btn = e.target.closest(".font-opt");
-    if (!btn || !fontTargetId) return;
-    setNoteFont(fontTargetId, btn.dataset.font);
-    closeFontPopover();
+  // ---------- Format toolbar (bold/italic/underline, heading, font, size) ----------
+  // Rich formatting is applied with execCommand against the browser's current
+  // selection. Clicking into a <select> or a toolbar button can shift focus
+  // away from the note being edited, which would otherwise lose that
+  // selection -- so the last real (non-collapsed) selection made inside a
+  // note's editor is cached here and restored before every command runs.
+  let formatTargetId = null;
+  let savedRange = null;
+  let savedRangeNoteId = null;
+
+  document.addEventListener("selectionchange", () => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    if (range.collapsed) return;
+    const container = range.commonAncestorContainer;
+    const el = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+    const editorEl = el && el.closest(".note-text");
+    if (!editorEl) return;
+    savedRange = range.cloneRange();
+    savedRangeNoteId = editorEl.closest(".note").dataset.id;
   });
+
+  function ensureEditableSelection(id, editorEl) {
+    const sel = window.getSelection();
+    if (savedRangeNoteId === id && savedRange && editorEl.contains(savedRange.commonAncestorContainer)) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange);
+      return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(editorEl);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    savedRange = range.cloneRange();
+    savedRangeNoteId = id;
+  }
+
+  function formatEditor() {
+    const refs = formatTargetId && noteEls.get(formatTargetId);
+    return refs ? refs.editor : null;
+  }
+
+  function withEditorSelection(fn) {
+    const editor = formatEditor();
+    if (!editor) return;
+    editor.focus();
+    ensureEditableSelection(formatTargetId, editor);
+    fn(editor);
+    savedRange = window.getSelection().rangeCount ? window.getSelection().getRangeAt(0).cloneRange() : savedRange;
+    savedRangeNoteId = formatTargetId;
+    refreshToolbarState();
+    sendHtmlUpdate(formatTargetId);
+  }
+
+  function refreshToolbarState() {
+    const editor = formatEditor();
+    if (!editor) return;
+    fmtBoldBtn.classList.toggle("active", document.queryCommandState("bold"));
+    fmtItalicBtn.classList.toggle("active", document.queryCommandState("italic"));
+    fmtUnderlineBtn.classList.toggle("active", document.queryCommandState("underline"));
+    const block = document.queryCommandValue("formatBlock").toUpperCase();
+    fmtHeadingSelect.value = block === "H2" || block === "H3" ? block : "P";
+  }
+
+  // Replacing the <font> marker elements execCommand produces invalidates
+  // whatever selection pointed into them, so every caller must re-select the
+  // freshly-created spans afterward -- otherwise the *next* toolbar command
+  // (e.g. size right after family) has nothing to apply to.
+  function reselectSpans(spans) {
+    if (!spans.length) return;
+    const range = document.createRange();
+    range.setStartBefore(spans[0]);
+    range.setEndAfter(spans[spans.length - 1]);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function applyFontFamily(editor, cssStack) {
+    const marker = "x-pending-font";
+    document.execCommand("fontName", false, marker);
+    const spans = [];
+    editor.querySelectorAll(`font[face="${marker}"]`).forEach((f) => {
+      const span = document.createElement("span");
+      span.style.fontFamily = cssStack;
+      while (f.firstChild) span.appendChild(f.firstChild);
+      f.replaceWith(span);
+      spans.push(span);
+    });
+    reselectSpans(spans);
+  }
+
+  function applyFontSize(editor, px) {
+    document.execCommand("fontSize", false, "7");
+    const spans = [];
+    editor.querySelectorAll('font[size="7"]').forEach((f) => {
+      const span = document.createElement("span");
+      span.style.fontSize = px + "px";
+      while (f.firstChild) span.appendChild(f.firstChild);
+      f.replaceWith(span);
+      spans.push(span);
+    });
+    reselectSpans(spans);
+  }
+
+  fmtBoldBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtItalicBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtUnderlineBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtBoldBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("bold")));
+  fmtItalicBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("italic")));
+  fmtUnderlineBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("underline")));
+  fmtHeadingSelect.addEventListener("change", () => {
+    const tag = fmtHeadingSelect.value === "P" ? "DIV" : fmtHeadingSelect.value;
+    withEditorSelection(() => document.execCommand("formatBlock", false, `<${tag}>`));
+  });
+  fmtFontSelect.addEventListener("change", () => {
+    withEditorSelection((editor) => applyFontFamily(editor, fmtFontSelect.value));
+  });
+  fmtSizeSelect.addEventListener("change", () => {
+    withEditorSelection((editor) => applyFontSize(editor, Number(fmtSizeSelect.value)));
+  });
+
+  function openFormatToolbar(id) {
+    if (!formatToolbar.hidden && formatTargetId === id) { closeFormatToolbar(); return; }
+    closeColorPopover();
+    formatTargetId = id;
+    positionPopoverNear(formatToolbar, id);
+    const editor = formatEditor();
+    if (editor) {
+      editor.focus();
+      ensureEditableSelection(id, editor);
+    }
+    refreshToolbarState();
+  }
+  function closeFormatToolbar() {
+    formatToolbar.hidden = true;
+    formatTargetId = null;
+  }
 
   // ---------- Adding notes ----------
   function addNote(worldX, worldY) {
@@ -398,14 +681,14 @@
       w: NOTE_W,
       h: NOTE_H,
       color: COLORS[Math.floor(Math.random() * COLORS.length)],
-      text: "",
+      html: "",
       rot: Math.round((Math.random() * 8 - 4) * 10) / 10,
       z: zCounter,
     };
     addNoteLocally(note);
     MP.sendCreate(note);
     const refs = noteEls.get(id);
-    if (refs) refs.textarea.focus();
+    if (refs) refs.editor.focus();
     return id;
   }
 
@@ -426,7 +709,7 @@
 
   // ---------- Pointer input: pan / drag note / pinch ----------
   const isUiChrome = (target) =>
-    !!target.closest(".fab, .zoom-controls, .menu-btn, .menu-drawer, .menu-backdrop, .color-popover, .font-popover");
+    !!target.closest(".fab, .zoom-controls, .menu-btn, .menu-drawer, .menu-backdrop, .color-popover, .format-toolbar");
 
   const activePointers = new Map(); // pointerId -> {x,y}
   let pinch = null;
@@ -517,7 +800,7 @@
       return;
     }
 
-    if (e.target.closest(".note")) return; // let the textarea/buttons handle it natively
+    if (e.target.closest(".note")) return; // let the editor/buttons handle it natively
 
     panPointerId = e.pointerId;
     panAnchorWorld = screenToWorld(e.clientX, e.clientY);

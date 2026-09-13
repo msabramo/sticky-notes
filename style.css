@@ -191,17 +191,31 @@ body {
 
 .note-text {
   flex: 1;
-  border: none;
+  overflow: auto;
   outline: none;
-  resize: none;
   background: transparent;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 14px;
   line-height: 1.35;
   color: rgba(0, 0, 0, 0.82);
   padding: 4px 10px 10px;
+  cursor: text;
 }
-.note-text::placeholder { color: rgba(0, 0, 0, 0.35); }
+.note-text:empty::before,
+.note-text:has(> br:only-child)::before {
+  content: attr(data-placeholder);
+  color: rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.note-text b, .note-text strong { font-weight: bold; }
+.note-text i, .note-text em { font-style: italic; }
+.note-text h1, .note-text h2, .note-text h3 {
+  margin: 2px 0;
+  line-height: 1.25;
+}
+.note-text h1 { font-size: 22px; }
+.note-text h2 { font-size: 18px; }
+.note-text h3 { font-size: 15px; }
 
 .note.selected {
   outline: 2px solid rgba(255, 255, 255, 0.6);
@@ -255,7 +269,7 @@ body {
 }
 
 .color-popover[hidden],
-.font-popover[hidden] {
+.format-toolbar[hidden] {
   display: none;
 }
 
@@ -269,31 +283,53 @@ body {
 }
 .color-opt:hover { transform: scale(1.1); }
 
-/* ---------- Font popover ---------- */
-.font-popover {
+/* ---------- Format toolbar ---------- */
+.format-toolbar {
   position: absolute;
   z-index: 5;
   display: flex;
+  flex-direction: column;
   gap: 6px;
   padding: 8px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  width: 240px;
 }
 
-.font-opt {
-  width: 34px;
+.format-row {
+  display: flex;
+  gap: 6px;
+}
+
+.format-btn {
+  width: 30px;
   height: 30px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   cursor: pointer;
   padding: 0;
+  flex-shrink: 0;
 }
-.font-opt:hover { background: #2a2f3a; }
+.format-btn:hover { background: #2a2f3a; }
+.format-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.format-select {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 4px;
+}
+.format-select-wide { flex: 2; }
 
 /* ---------- Zoom controls ---------- */
 .zoom-controls {
