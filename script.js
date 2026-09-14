@@ -963,14 +963,20 @@
   // state, synced like notes but stored under a separate server-side key so
   // "Clear Board" (which only wipes notes) leaves the schema intact.
   //
-  // There are still no accounts in this app (see README), but a "Person"
+  // There are still no accounts in this app (see README), but a "Person(s)"
   // field lets one of the other deliberately generic types -- select --
   // specialize: instead of the board author typing out everyone's name as
   // manual options, its choices are whoever's local identity (see "Local
   // identity" above) has ever touched this board, kept in `roster`. A
-  // value is a user id, resolved against `roster` at render time rather
-  // than a name/color baked in when it was set, so renaming yourself
-  // updates every note you're assigned to.
+  // value is an array of entries -- see the "user field values" comment
+  // below -- resolved against `roster` at render time rather than a
+  // name/color baked in when set, so renaming yourself updates every note
+  // you're assigned to. Three field-level settings (stored on the field
+  // definition, not per note) shape it: `userMulti` allows more than one
+  // person; `userMatchMode` ("any" | "all") records, for a later filtering
+  // feature, whether a note should match when *any* or *all* of a
+  // multi-person field's people match; `userAllowFreeText` allows typing a
+  // plain name for someone not using this board at all.
   const FIELD_TYPES = [
     { id: "text", label: "Text" },
     { id: "number", label: "Number" },
@@ -978,13 +984,14 @@
     { id: "date", label: "Date" },
     { id: "select", label: "Single select" },
     { id: "multiselect", label: "Multi-select (tags)" },
-    { id: "user", label: "Person" },
+    { id: "user", label: "Person(s)" },
   ];
   const FIELD_TYPE_IDS = new Set(FIELD_TYPES.map((t) => t.id));
   const FIELD_TYPES_WITH_OPTIONS = new Set(["select", "multiselect"]);
   const OPTION_COLORS = ["#90caf9", "#a5d6a7", "#ffe082", "#ffab91", "#ce93d8", "#f48fb1", "#80cbc4", "#bcaaa4"];
   const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
   const MAX_FIELD_TEXT_LEN = 200;
+  const MAX_USER_FIELD_ENTRIES = 20;
 
   // Ready-made fields covering the common cases (todo-style status, an
   // assignee, priority, tags, a due date) so the feature is useful the
@@ -1000,7 +1007,7 @@
         { label: "Done", color: "#a5d6a7" },
       ],
     },
-    { name: "Assignee", type: "user", options: [] },
+    { name: "Assignee", type: "user", options: [], userMulti: false, userAllowFreeText: true },
     {
       name: "Priority",
       type: "select",
@@ -1045,8 +1052,37 @@
           color: sanitizeFieldColor(o && o.color),
         }));
       }
+      if (type === "user") {
+        def.userMulti = !!(f && f.userMulti);
+        def.userMatchMode = f && f.userMatchMode === "all" ? "all" : "any";
+        def.userAllowFreeText = !!(f && f.userAllowFreeText);
+      }
       return def;
     });
+  }
+
+  // A "user" field's per-note value is an array of entries, each either a
+  // roster reference ({ u: userId }, resolved against `roster` at render
+  // time) or a freely-typed name ({ n: "some name" }) for someone not
+  // using this board -- kept as a tagged shape rather than plain strings
+  // so a typed name can never collide with a roster id. Also accepts the
+  // old pre-multi shape (a bare user id string) so notes saved before this
+  // existed still render.
+  function normalizeUserFieldValue(value) {
+    if (Array.isArray(value)) {
+      return value
+        .map((e) => {
+          if (e && typeof e === "object") {
+            if (typeof e.u === "string" && e.u) return { u: e.u };
+            if (typeof e.n === "string" && e.n.trim()) return { n: e.n.trim().slice(0, 40) };
+          }
+          return null;
+        })
+        .filter(Boolean)
+        .slice(0, MAX_USER_FIELD_ENTRIES);
+    }
+    if (typeof value === "string" && value) return [{ u: value }];
+    return [];
   }
 
   function findOptionDef(field, id) {
@@ -1080,16 +1116,22 @@
     return chip;
   }
 
-  function makeUserChip(userId) {
-    const u = roster.get(userId);
+  // `entry` is one normalized user-field value: { u: userId } (resolved
+  // against the roster) or { n: name } (a freely-typed name with no
+  // identity behind it -- shown with a dashed avatar to mark it as such).
+  function makeUserChip(entry) {
+    const isFreeText = !!(entry && entry.n);
+    const name = isFreeText ? entry.n : (roster.get(entry && entry.u) || {}).name || "Unknown";
+    const initials = isFreeText ? initialsFrom(entry.n) : (roster.get(entry.u) || {}).initials || "?";
+    const color = isFreeText ? "#888" : (roster.get(entry.u) || {}).color || "#888";
     const chip = document.createElement("span");
-    chip.className = "field-chip user-chip";
+    chip.className = "field-chip user-chip" + (isFreeText ? " user-chip-freetext" : "");
     const dot = document.createElement("span");
     dot.className = "user-chip-avatar";
-    dot.style.background = (u && u.color) || "#888";
-    dot.textContent = (u && u.initials) || "?";
+    dot.style.background = color;
+    dot.textContent = initials;
     chip.appendChild(dot);
-    chip.appendChild(document.createTextNode((u && u.name) || "Unknown"));
+    chip.appendChild(document.createTextNode(name));
     return chip;
   }
 
@@ -1122,9 +1164,10 @@
           row.appendChild(makeFieldChip(opt.label, opt.color));
         }
       } else if (field.type === "user") {
-        if (!value) continue;
-        any = true;
-        row.appendChild(makeUserChip(value));
+        for (const entry of normalizeUserFieldValue(value)) {
+          any = true;
+          row.appendChild(makeUserChip(entry));
+        }
       } else {
         // text, number, date
         if (value === undefined || value === null || value === "") continue;
@@ -1170,6 +1213,142 @@
     else note.fields[fieldId] = value;
     renderNoteFieldRow(id);
     MP.sendUpdate(id, { fields: note.fields });
+  }
+
+  // A small text input + "Add" button for typing a free-form name into a
+  // "user" field that allows it. Enter or the button both commit; `onAdd`
+  // receives the trimmed, non-empty name.
+  function makeFreeTextAddRow(onAdd) {
+    const freeRow = document.createElement("div");
+    freeRow.className = "user-field-freetext-row";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Type a name…";
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn small";
+    addBtn.textContent = "Add";
+    const submit = () => {
+      const name = input.value.trim().slice(0, 40);
+      if (!name) return;
+      input.value = "";
+      onAdd(name);
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); submit(); }
+    });
+    addBtn.addEventListener("click", submit);
+    freeRow.appendChild(input);
+    freeRow.appendChild(addBtn);
+    return freeRow;
+  }
+
+  // Builds the editor for a "user" field inside the per-note fields
+  // popover. Single-person fields keep the old plain-<select> feel (plus a
+  // freetext input alongside it, if the field allows one); multi-person
+  // fields show removable chips for whoever's already assigned plus
+  // always-visible "add" controls, mirroring the multiselect option-toggle
+  // pattern elsewhere in this file but with a growing roster (+ freetext)
+  // instead of a fixed option list.
+  function renderUserFieldEditor(id, field, entries) {
+    const wrap = document.createElement("div");
+    wrap.className = "user-field-editor";
+    const commitAndRerender = (next) => {
+      setNoteFieldValue(id, field.id, next);
+      renderNoteFieldsPopoverContent(id);
+      positionPopoverNear(noteFieldsPopover, id);
+    };
+
+    if (field.userMulti) {
+      if (entries.length) {
+        const chipsRow = document.createElement("div");
+        chipsRow.className = "user-field-selected";
+        entries.forEach((entry, idx) => {
+          const chip = makeUserChip(entry);
+          const rm = document.createElement("button");
+          rm.type = "button";
+          rm.className = "chip-remove";
+          rm.title = "Remove";
+          rm.textContent = "×";
+          rm.addEventListener("click", () => commitAndRerender(entries.filter((_, i) => i !== idx)));
+          chip.appendChild(rm);
+          chipsRow.appendChild(chip);
+        });
+        wrap.appendChild(chipsRow);
+      }
+
+      const addedUserIds = new Set(entries.filter((e) => e.u).map((e) => e.u));
+      const candidates = [...roster.entries()]
+        .filter(([userId]) => !addedUserIds.has(userId))
+        .sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
+      const select = document.createElement("select");
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "+ Add person…";
+      select.appendChild(blank);
+      for (const [userId, u] of candidates) {
+        const o = document.createElement("option");
+        o.value = userId;
+        o.textContent = (u.name || "Anonymous") + (userId === myUserId ? " (you)" : "");
+        select.appendChild(o);
+      }
+      select.addEventListener("change", () => {
+        if (!select.value) return;
+        commitAndRerender([...entries, { u: select.value }]);
+      });
+      wrap.appendChild(select);
+
+      if (field.userAllowFreeText) {
+        wrap.appendChild(makeFreeTextAddRow((name) => commitAndRerender([...entries, { n: name }])));
+      }
+    } else {
+      const current = entries[0] || null;
+      const select = document.createElement("select");
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "— Unassigned —";
+      if (!current) blank.selected = true;
+      select.appendChild(blank);
+      let currentInRoster = false;
+      const rosterEntries = [...roster.entries()].sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
+      for (const [userId, u] of rosterEntries) {
+        const isCurrent = !!current && current.u === userId;
+        if (isCurrent) currentInRoster = true;
+        const o = document.createElement("option");
+        o.value = userId;
+        o.textContent = (u.name || "Anonymous") + (userId === myUserId ? " (you)" : "");
+        if (isCurrent) o.selected = true;
+        select.appendChild(o);
+      }
+      // A value can outlive its roster entry only if this board's roster
+      // was somehow cleared server-side -- keep it selectable rather than
+      // silently discarding whoever it pointed to.
+      if (current && current.u && !currentInRoster) {
+        const o = document.createElement("option");
+        o.value = current.u;
+        o.textContent = "Unknown user";
+        o.selected = true;
+        select.appendChild(o);
+      }
+      select.addEventListener("change", () => {
+        commitAndRerender(select.value ? [{ u: select.value }] : []);
+      });
+      wrap.appendChild(select);
+
+      if (field.userAllowFreeText) {
+        const freeInput = document.createElement("input");
+        freeInput.type = "text";
+        freeInput.placeholder = "…or type a name";
+        freeInput.value = current && current.n ? current.n : "";
+        freeInput.addEventListener("change", () => {
+          const name = freeInput.value.trim().slice(0, 40);
+          commitAndRerender(name ? [{ n: name }] : []);
+        });
+        wrap.appendChild(freeInput);
+      }
+    }
+
+    return wrap;
   }
 
   function renderNoteFieldsPopoverContent(id) {
@@ -1251,34 +1430,7 @@
         }
         row.appendChild(wrap);
       } else if (field.type === "user") {
-        const select = document.createElement("select");
-        const blank = document.createElement("option");
-        blank.value = "";
-        blank.textContent = "— Unassigned —";
-        select.appendChild(blank);
-        const currentValue = values[field.id];
-        let currentInRoster = false;
-        const entries = [...roster.entries()].sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
-        for (const [userId, u] of entries) {
-          if (userId === currentValue) currentInRoster = true;
-          const o = document.createElement("option");
-          o.value = userId;
-          o.textContent = (u.name || "Anonymous") + (userId === myUserId ? " (you)" : "");
-          if (currentValue === userId) o.selected = true;
-          select.appendChild(o);
-        }
-        // A value can outlive its roster entry only if this board's roster
-        // was somehow cleared server-side -- keep it selectable rather than
-        // silently discarding whoever it pointed to.
-        if (currentValue && !currentInRoster) {
-          const o = document.createElement("option");
-          o.value = currentValue;
-          o.textContent = "Unknown user";
-          o.selected = true;
-          select.appendChild(o);
-        }
-        select.addEventListener("change", () => setNoteFieldValue(id, field.id, select.value));
-        row.appendChild(select);
+        row.appendChild(renderUserFieldEditor(id, field, normalizeUserFieldValue(values[field.id])));
       }
       noteFieldsPopover.appendChild(row);
     }
@@ -1328,6 +1480,11 @@
       if (FIELD_TYPES_WITH_OPTIONS.has(field.type) && !field.options.length) {
         field.options = [{ id: makeId(), label: "Option 1", color: OPTION_COLORS[0] }];
       }
+      if (field.type === "user") {
+        if (field.userMulti === undefined) field.userMulti = false;
+        if (!field.userMatchMode) field.userMatchMode = "any";
+        if (field.userAllowFreeText === undefined) field.userAllowFreeText = false;
+      }
       commitFieldDefs();
     });
 
@@ -1348,8 +1505,68 @@
     row.appendChild(top);
 
     if (FIELD_TYPES_WITH_OPTIONS.has(field.type)) row.appendChild(renderFieldOptionsEditor(field));
+    if (field.type === "user") row.appendChild(renderUserFieldSettings(field));
 
     return row;
+  }
+
+  // Field-level (not per-note) settings for a "user" field: whether more
+  // than one person can be assigned, how a later filtering feature should
+  // treat a multi-person value ("any" vs "all" of them matching), and
+  // whether a plain typed name is allowed alongside real board users.
+  function renderUserFieldSettings(field) {
+    const wrap = document.createElement("div");
+    wrap.className = "field-options-editor user-field-settings";
+
+    const multiRow = document.createElement("label");
+    multiRow.className = "field-checkbox-row";
+    const multiCb = document.createElement("input");
+    multiCb.type = "checkbox";
+    multiCb.checked = !!field.userMulti;
+    multiCb.addEventListener("change", () => {
+      field.userMulti = multiCb.checked;
+      commitFieldDefs();
+    });
+    multiRow.appendChild(multiCb);
+    multiRow.appendChild(document.createTextNode(" Allow more than one person"));
+    wrap.appendChild(multiRow);
+
+    if (field.userMulti) {
+      const modeRow = document.createElement("label");
+      modeRow.className = "field-checkbox-row";
+      modeRow.appendChild(document.createTextNode("Note matches when "));
+      const modeSelect = document.createElement("select");
+      modeSelect.className = "field-type-select";
+      for (const [val, label] of [["any", "any of them"], ["all", "all of them"]]) {
+        const o = document.createElement("option");
+        o.value = val;
+        o.textContent = label;
+        if ((field.userMatchMode || "any") === val) o.selected = true;
+        modeSelect.appendChild(o);
+      }
+      modeSelect.addEventListener("change", () => {
+        field.userMatchMode = modeSelect.value;
+        commitFieldDefs();
+      });
+      modeRow.appendChild(modeSelect);
+      modeRow.appendChild(document.createTextNode(" match (used by filtering, later)"));
+      wrap.appendChild(modeRow);
+    }
+
+    const freeRow = document.createElement("label");
+    freeRow.className = "field-checkbox-row";
+    const freeCb = document.createElement("input");
+    freeCb.type = "checkbox";
+    freeCb.checked = !!field.userAllowFreeText;
+    freeCb.addEventListener("change", () => {
+      field.userAllowFreeText = freeCb.checked;
+      commitFieldDefs();
+    });
+    freeRow.appendChild(freeCb);
+    freeRow.appendChild(document.createTextNode(" Allow typing a name (for people not using this board)"));
+    wrap.appendChild(freeRow);
+
+    return wrap;
   }
 
   function renderFieldOptionsEditor(field) {
@@ -1429,6 +1646,13 @@
           name: preset.name,
           type: preset.type,
           options: preset.options.map((o) => ({ id: makeId(), label: o.label, color: o.color })),
+          ...(preset.type === "user"
+            ? {
+                userMulti: !!preset.userMulti,
+                userMatchMode: preset.userMatchMode === "all" ? "all" : "any",
+                userAllowFreeText: !!preset.userAllowFreeText,
+              }
+            : {}),
         });
         commitFieldDefs();
       });

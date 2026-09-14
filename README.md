@@ -62,24 +62,31 @@ same coordinate space, so notes always line up between devices.
   per-browser identity (saved in `localStorage`) that lets everyone else on
   the board tell who's who: it labels your live cursor, shows up in the
   presence row of avatars next to the ☰ button for everyone currently on
-  the board, and is what a **Person** custom field (below) offers as its
-  choices. Leave it unset and you're just "Anonymous" with a random color —
-  still visible to others, just not named.
+  the board, and is what a **Person(s)** custom field (below) offers as
+  its choices. Leave it unset and you're just "Anonymous" with a random
+  color — still visible to others, just not named.
 - **Custom fields** — tap the 🏷 button in a note's header to set values for
   whatever metadata fields the board defines (e.g. Status, Assignee,
   Priority, Tags, Due date), shown as small colored chips on the note.
   Define the fields themselves from the hamburger menu → **Manage Fields**:
   add a field, name it, and pick a type — text, number, checkbox, date,
-  single-select, multi-select (tags), or person — with a few one-tap
+  single-select, multi-select (tags), or person(s) — with a few one-tap
   presets to get started. Select/multi-select fields have their own colored
   options (e.g. "To do / In progress / Done" for Status), so a board can be
-  run as a lightweight kanban-style todo list. A **person** field (e.g.
+  run as a lightweight kanban-style todo list. A **person(s)** field (e.g.
   "Assignee") is a select whose options aren't typed in by hand — its
-  dropdown auto-fills with everyone who's set a name/color on this board
+  choices auto-fill with everyone who's set a name/color on this board
   (see "Your name" above), so assigning a note to someone is picking them
-  from a list rather than retyping their name. Field definitions are shared
-  board-wide state, just like the notes; clearing the board wipes notes but
-  leaves the field definitions (and everyone's names) in place.
+  from a list rather than retyping their name. Three checkboxes on the
+  field itself (in Manage Fields) shape it: **allow more than one
+  person**, which also exposes an **any of / all of** setting recording
+  how a later filtering feature should treat a multi-person value; and
+  **allow typing a name**, for assigning a note to someone who isn't using
+  this board at all — shown with a dashed avatar to mark it as an
+  unverified, freely-typed name rather than a real board member. Field
+  definitions are shared board-wide state, just like the notes; clearing
+  the board wipes notes but leaves the field definitions (and everyone's
+  names) in place.
 - **Delete** — tap the × button in a note's header.
 - **Photo to notes** — tap 📷 (bottom-left, above **+**) to snap or pick a
   photo of a handwritten or printed to-do list; each item it finds
@@ -93,7 +100,7 @@ same coordinate space, so notes always line up between devices.
 
 Not in this pass: images/attachments and connectors between notes — natural
 next additions rather than being folded in here. (Per-browser identity —
-name, initials, color, live cursor labels, a presence row, and a Person
+name, initials, color, live cursor labels, a presence row, and a Person(s)
 custom field built on top of it — is covered above under "Your name" and
 "Custom fields"; a board-wide custom-fields system covers todo-style
 status/tags the same way, without needing real accounts.)
@@ -117,7 +124,7 @@ intact, and are sent to a new connection alongside note history.
 A client's chosen name/initials/color (see "Your name" above) is broadcast
 once per connection and again on every edit, stored under its own key so
 the board accumulates a roster of everyone who's ever used it — that
-roster is what a Person custom field's dropdown is built from. It's kept
+roster is what a Person(s) custom field's choices are built from. It's kept
 separate from *who's currently connected*: each live connection also
 tracks the identity it last announced, so a new connection's history
 message can report both the all-time roster and who's online right now.
