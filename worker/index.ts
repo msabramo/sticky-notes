@@ -33,6 +33,10 @@ import { DurableObject } from "cloudflare:workers";
  *     notes) leaves field definitions in place. A new connection receives
  *     the current schema alongside note history: { t: "history", notes,
  *     fields }.
+ *   background: { t: "background", background }  -- sets the board's
+ *     background type (a string id like "grid"/"whiteboard"/"chalkboard"/
+ *     "pinboard", opaque to the server). Stored like `fields`, separately
+ *     from notes, and included in the history payload as `background`.
  *
  * POST /board/<board-id>/vision is a separate, non-websocket endpoint: send
  * { image: "data:image/...;base64,..." } and get back { items: string[] }
@@ -51,6 +55,7 @@ interface Env {
 
 const NOTE_PREFIX = "note:";
 const FIELDS_KEY = "schema:fields";
+const BACKGROUND_KEY = "schema:background";
 const MAX_NOTES = 2000;
 const VISION_DAILY_LIMIT = 30;
 const CORS_HEADERS: Record<string, string> = {
@@ -141,7 +146,8 @@ export class NotesBoard extends DurableObject<Env> {
     const stored = await this.ctx.storage.list({ prefix: NOTE_PREFIX });
     const notes = [...stored.values()];
     const fields = (await this.ctx.storage.get(FIELDS_KEY)) as unknown[] | undefined;
-    server.send(JSON.stringify({ t: "history", notes, fields: fields || [] }));
+    const background = (await this.ctx.storage.get(BACKGROUND_KEY)) as string | undefined;
+    server.send(JSON.stringify({ t: "history", notes, fields: fields || [], background: background || "grid" }));
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -231,6 +237,12 @@ export class NotesBoard extends DurableObject<Env> {
       case "fields": {
         const fields = Array.isArray(data.fields) ? data.fields : [];
         await this.ctx.storage.put(FIELDS_KEY, fields);
+        this.broadcast(out, senderId);
+        break;
+      }
+      case "background": {
+        const background = typeof data.background === "string" ? data.background : "grid";
+        await this.ctx.storage.put(BACKGROUND_KEY, background);
         this.broadcast(out, senderId);
         break;
       }
