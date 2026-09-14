@@ -42,6 +42,7 @@
   // Real font names, mapped to a stack with sensible cross-platform fallbacks.
   // Also doubles as the allowlist the HTML sanitizer checks font-family values against.
   const FONT_OPTIONS = [
+    { label: "Handwriting", value: `"Caveat", "Comic Sans MS", "Segoe Print", cursive` },
     { label: "System Sans", value: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif` },
     { label: "Arial", value: `Arial, Helvetica, sans-serif` },
     { label: "Helvetica", value: `Helvetica, Arial, sans-serif` },
@@ -144,6 +145,49 @@
   function makeId() {
     // Avoids crypto.randomUUID for wider WebKit/webview compatibility.
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+  }
+
+  // A handwriting font still looks too uniform if every note leans the exact
+  // same way, so each note gets a small deterministic (hash of its id, so it
+  // stays put across re-renders/peers) chance of a slight extra slant on top
+  // of its whole-note rotation -- "sometimes", not always.
+  function noteTextSlantDeg(id) {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+    h = Math.abs(h);
+    if (h % 100 < 55) return 0;
+    const magnitude = 1.5 + (h % 30) / 10; // ~1.5deg - 4.4deg
+    return h % 2 === 0 ? magnitude : -magnitude;
+  }
+
+  // ---------- Autofit: scale note text as big as will still fit the box ----------
+  const AUTOFIT_MIN_PX = 13;
+  const AUTOFIT_MAX_PX = 64;
+  const autofitScheduled = new Set();
+
+  function autofitNoteText(id) {
+    const refs = noteEls.get(id);
+    if (!refs || !refs.editor.isConnected) return;
+    const el = refs.editor;
+    let lo = AUTOFIT_MIN_PX, hi = AUTOFIT_MAX_PX, best = AUTOFIT_MIN_PX;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      el.style.fontSize = mid + "px";
+      const fits = el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1;
+      if (fits) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    el.style.fontSize = best + "px";
+  }
+
+  // Coalesces bursts of triggers (fast typing, a resize drag) into one
+  // measurement per frame instead of one per event.
+  function scheduleAutofit(id) {
+    if (!id || autofitScheduled.has(id)) return;
+    autofitScheduled.add(id);
+    requestAnimationFrame(() => {
+      autofitScheduled.delete(id);
+      autofitNoteText(id);
+    });
   }
 
   for (const { label, value } of FONT_OPTIONS) {
@@ -319,6 +363,8 @@
     editor.dataset.placeholder = "Type…";
     editor.spellcheck = false;
     editor.innerHTML = initialNoteHtml(note);
+    const slant = noteTextSlantDeg(note.id);
+    if (slant) editor.style.fontStyle = `oblique ${slant}deg`;
 
     const resizeHandle = document.createElement("div");
     resizeHandle.className = "note-resize";
@@ -349,6 +395,7 @@
       // Chrome leaves a stray <br> behind when the last character is deleted;
       // normalize that back to empty so the CSS placeholder shows again.
       if (editor.innerHTML === "<br>") editor.innerHTML = "";
+      scheduleAutofit(note.id);
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => sendHtmlUpdate(note.id), 400);
     });
@@ -363,6 +410,7 @@
     });
 
     noteEls.set(note.id, { el, header, editor, colorBtn });
+    autofitNoteText(note.id);
     return el;
   }
 
@@ -469,6 +517,7 @@
       if (data.color) refs.el.style.background = data.color;
       if (typeof data.w === "number") refs.el.style.width = data.w + "px";
       if (typeof data.h === "number") refs.el.style.height = data.h + "px";
+      scheduleAutofit(data.id);
     }
     positionNoteEl(data.id);
     zCounter = Math.max(zCounter, note.z || 0);
@@ -584,6 +633,7 @@
     savedRange = window.getSelection().rangeCount ? window.getSelection().getRangeAt(0).cloneRange() : savedRange;
     savedRangeNoteId = formatTargetId;
     refreshToolbarState();
+    scheduleAutofit(formatTargetId);
     sendHtmlUpdate(formatTargetId);
   }
 
@@ -932,6 +982,7 @@
         refs.el.style.width = note.w + "px";
         refs.el.style.height = note.h + "px";
       }
+      scheduleAutofit(resizeNoteId);
       const now = performance.now();
       if (now - lastMoveSent > 60) {
         MP.sendUpdate(resizeNoteId, { w: Math.round(note.w), h: Math.round(note.h) });
