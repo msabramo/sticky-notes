@@ -57,6 +57,10 @@ same coordinate space, so notes always line up between devices.
   (a real list of named fonts, not just five presets), and font size.
   With nothing selected, a change applies to the whole note.
 - **Delete** — tap the × button in a note's header.
+- **Photo to notes** — tap 📷 (bottom-left, above **+**) to snap or pick a
+  photo of a handwritten or printed to-do list; each item it finds
+  becomes its own note, arranged in a grid at your current view.
+  Requires the Worker's `ANTHROPIC_API_KEY` to be set (see Deploying).
 - **Clear the board** — from the hamburger menu (☰, top right); wipes
   every note for everyone and can't be undone.
 - **Pan** — drag empty board space.
@@ -83,6 +87,31 @@ This runs on Cloudflare's **Workers Free plan** — Durable Objects
 limits (100k requests/day, 5GB storage) far beyond what a hobby board
 needs.
 
+### Photo-to-notes (Claude vision)
+
+`POST /board/<board-id>/vision` sends a photo to the Anthropic API and
+returns the to-do items it finds as `{ items: string[] }`. It's a
+separate, non-WebSocket route handled by the same per-board Durable
+Object.
+
+This app has no accounts, so there's no per-user login to gate this
+behind. Instead it's gated the same way the rest of a board already
+is: knowing the board's id. That's obscurity, not real authentication
+— good enough to keep it off search engines and random scanners, not
+proof against someone you shared a board link with forwarding it
+further. Two things bound the damage if a link does leak:
+
+- The API key lives only in the Worker (`ANTHROPIC_API_KEY`, set via
+  `wrangler secret put`, never shipped to the browser), so a leaked
+  board link can spend it but can't extract it.
+- Each board is capped at 30 photo scans/day (`VISION_DAILY_LIMIT` in
+  `worker/index.ts`), so a leaked link costs at most a bounded amount
+  per day, not an open tap on your account.
+
+For tighter accounting, create the key in its own [Anthropic Console
+workspace](https://console.anthropic.com) with a monthly spend limit,
+rather than reusing a key from a workspace used for other things.
+
 ## Local development
 
 ```
@@ -95,16 +124,24 @@ Object) locally — no Cloudflare account needed. Then open `index.html`
 directly, or serve it with any static server (e.g. `python3 -m http.server`)
 so it can reach `ws://127.0.0.1:8787`.
 
+To test photo-to-notes locally, put `ANTHROPIC_API_KEY=sk-ant-...` in a
+`.dev.vars` file in the repo root (gitignored; `wrangler dev` reads it
+automatically, no `wrangler secret put` needed for local runs).
+
 ## Deploying
 
 1. `npx wrangler login` (one-time, needs a free Cloudflare account).
-2. `npm run deploy` — deploys the Worker and prints its URL, something
+2. `npx wrangler secret put ANTHROPIC_API_KEY` (one-time, only needed
+   for the photo-to-notes feature) — pastes your key in without it
+   touching a file or shell history. Without this the rest of the app
+   works fine; the 📷 button just returns a clear "not configured" error.
+3. `npm run deploy` — deploys the Worker and prints its URL, something
    like `sticky-notes.YOUR-SUBDOMAIN.workers.dev`.
-3. Put that host in `index.html`'s `<meta name="worker-host">` tag.
-4. Host the three static files (`index.html`, `style.css`, `script.js`)
+4. Put that host in `index.html`'s `<meta name="worker-host">` tag.
+5. Host the three static files (`index.html`, `style.css`, `script.js`)
    anywhere — GitHub Pages, Cloudflare Pages, S3, your own server. No
    build step required.
-5. Whenever you redeploy after changing `style.css` or `script.js`,
+6. Whenever you redeploy after changing `style.css` or `script.js`,
    bump the `?v=N` query string on their `<link>`/`<script>` tags in
    `index.html`. Browsers and CDNs cache those files by URL, so without
    a new version number some visitors keep getting old, possibly

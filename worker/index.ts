@@ -22,19 +22,103 @@ import { DurableObject } from "cloudflare:workers";
  *   delete: { t: "delete", id }
  *   clear:  { t: "clear" }
  *   cursor: { t: "cursor", x, y, color }  (never persisted)
+ *
+ * POST /board/<board-id>/vision is a separate, non-websocket endpoint: send
+ * { image: "data:image/...;base64,..." } and get back { items: string[] }
+ * extracted from a photo of a to-do list via the Anthropic API. It's gated
+ * the same way the rest of the board is -- knowing the board's id -- rather
+ * than requiring any accounts, since this app has none. That's obscurity,
+ * not real authentication, so a per-board daily cap (VISION_DAILY_LIMIT)
+ * bounds the damage if a board URL ever leaks, given the endpoint spends
+ * the shared ANTHROPIC_API_KEY on every call.
  */
 
 interface Env {
   BOARD: DurableObjectNamespace<NotesBoard>;
+  ANTHROPIC_API_KEY?: string;
 }
 
 const NOTE_PREFIX = "note:";
 const MAX_NOTES = 2000;
+const VISION_DAILY_LIMIT = 30;
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
 type ConnAttachment = { id: string };
 type Note = { id: string } & Record<string, unknown>;
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...CORS_HEADERS },
+  });
+}
+
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10); // UTC calendar day
+}
+
+/** Calls the Anthropic API with the photo and asks for a plain JSON array of
+ * list-item strings back. Throws on any failure; the caller turns that into
+ * a user-facing error response. */
+async function extractListItems(apiKey: string, mediaType: string, base64: string): Promise<string[]> {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-5",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+            {
+              type: "text",
+              text:
+                "This image shows a list of to-do items -- handwritten or typed, on paper, a " +
+                "whiteboard, or a screen. Extract each distinct item as a short string, dropping " +
+                "any checkboxes, bullets, or numbering. Respond with ONLY a JSON array of strings " +
+                'and nothing else, e.g. ["Buy milk","Call dentist"]. If you see no list items, ' +
+                "respond with [].",
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Anthropic API error (${res.status})`);
+  }
+  const data = (await res.json()) as { content?: { type: string; text?: string }[] };
+  const text = data.content?.find((block) => block.type === "text")?.text ?? "[]";
+  const match = text.match(/\[[\s\S]*\]/);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match ? match[0] : "[]");
+  } catch {
+    throw new Error("Couldn't parse a list from that photo.");
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, 40);
+}
+
 export class NotesBoard extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname.endsWith("/vision")) {
+      return this.handleVision(request);
+    }
+
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
@@ -47,6 +131,40 @@ export class NotesBoard extends DurableObject<Env> {
     server.send(JSON.stringify({ t: "history", notes }));
 
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async handleVision(request: Request): Promise<Response> {
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
+    if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405);
+    if (!this.env.ANTHROPIC_API_KEY) {
+      return jsonResponse({ error: "Photo scanning isn't configured on this server." }, 500);
+    }
+
+    const rateLimitKey = "visionCount:" + todayKey();
+    const count = ((await this.ctx.storage.get(rateLimitKey)) as number) || 0;
+    if (count >= VISION_DAILY_LIMIT) {
+      return jsonResponse({ error: "This board has hit its daily photo-scan limit. Try again tomorrow." }, 429);
+    }
+
+    let body: { image?: string };
+    try {
+      body = await request.json();
+    } catch {
+      return jsonResponse({ error: "Malformed request." }, 400);
+    }
+    const match = typeof body.image === "string" && body.image.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+    if (!match) {
+      return jsonResponse({ error: "No image provided." }, 400);
+    }
+    const [, mediaType, base64] = match;
+
+    try {
+      const items = await extractListItems(this.env.ANTHROPIC_API_KEY, mediaType, base64);
+      await this.ctx.storage.put(rateLimitKey, count + 1);
+      return jsonResponse({ items });
+    } catch (err) {
+      return jsonResponse({ error: "Photo scan failed. Try again." }, 502);
+    }
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
@@ -118,13 +236,20 @@ export class NotesBoard extends DurableObject<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const match = url.pathname.match(/^\/board\/([A-Za-z0-9_-]+)$/);
-    if (!match || request.headers.get("Upgrade") !== "websocket") {
+
+    const visionMatch = url.pathname.match(/^\/board\/([A-Za-z0-9_-]+)\/vision$/);
+    if (visionMatch) {
+      const stub = env.BOARD.getByName(visionMatch[1]);
+      return stub.fetch(request);
+    }
+
+    const wsMatch = url.pathname.match(/^\/board\/([A-Za-z0-9_-]+)$/);
+    if (!wsMatch || request.headers.get("Upgrade") !== "websocket") {
       return new Response("Sticky Notes realtime server. Connect via WebSocket to /board/<board-id>.", {
-        status: match ? 426 : 404,
+        status: wsMatch ? 426 : 404,
       });
     }
-    const stub = env.BOARD.getByName(match[1]);
+    const stub = env.BOARD.getByName(wsMatch[1]);
     return stub.fetch(request);
   },
 };

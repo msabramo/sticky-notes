@@ -23,6 +23,8 @@
       </div>
 
       <button class="fab" id="addNoteBtn" title="Add a sticky note">+</button>
+      <button class="fab fab-secondary" id="scanBtn" title="Turn a photo of a to-do list into sticky notes">📷</button>
+      <input type="file" accept="image/*" capture="environment" id="photoInput" hidden />
 
       <div class="zoom-controls no-print">
         <button id="zoomInBtn" class="zoom-btn" title="Zoom in">+</button>
@@ -74,7 +76,7 @@
       <a href="?" id="newBoardLink" class="btn">✨ Start a New Board</a>
     </div>
     <div class="menu-divider"></div>
-    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, and size — select some text first to format just that part. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
+    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, and size — select some text first to format just that part. Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
   </aside>
 
   <script src="script.js?v=3"></script>

@@ -5,6 +5,8 @@
   const world = document.getElementById("world");
   const cursorsEl = document.getElementById("cursors");
   const addNoteBtn = document.getElementById("addNoteBtn");
+  const scanBtn = document.getElementById("scanBtn");
+  const photoInput = document.getElementById("photoInput");
   const zoomInBtn = document.getElementById("zoomInBtn");
   const zoomOutBtn = document.getElementById("zoomOutBtn");
   const fitBtn = document.getElementById("fitBtn");
@@ -671,7 +673,7 @@
   }
 
   // ---------- Adding notes ----------
-  function addNote(worldX, worldY) {
+  function addNote(worldX, worldY, text) {
     const id = makeId();
     zCounter += 1;
     const note = {
@@ -681,14 +683,16 @@
       w: NOTE_W,
       h: NOTE_H,
       color: COLORS[Math.floor(Math.random() * COLORS.length)],
-      html: "",
+      html: text ? sanitizeHtml(legacyTextToHtml(text)) : "",
       rot: Math.round((Math.random() * 8 - 4) * 10) / 10,
       z: zCounter,
     };
     addNoteLocally(note);
     MP.sendCreate(note);
+    // A blank note is created for immediate typing, so it should grab focus;
+    // a batch of notes from a photo scan shouldn't steal focus from any of them.
     const refs = noteEls.get(id);
-    if (refs) refs.editor.focus();
+    if (refs && !text) refs.editor.focus();
     return id;
   }
 
@@ -699,6 +703,92 @@
       vr.x + vr.w / 2 + (Math.random() * jitter * 2 - jitter),
       vr.y + vr.h / 2 + (Math.random() * jitter * 2 - jitter)
     );
+  });
+
+  // ---------- Photo-to-notes (Claude vision) ----------
+  // Arranges a batch of extracted items into a centered grid in the current
+  // view, roughly square, so they land as a readable cluster rather than
+  // stacked on top of each other.
+  function addNotesFromTexts(items) {
+    const vr = visibleWorldRect();
+    const cols = Math.max(1, Math.ceil(Math.sqrt(items.length)));
+    const rows = Math.ceil(items.length / cols);
+    const gapX = NOTE_W + 20;
+    const gapY = NOTE_H + 20;
+    const startX = vr.x + vr.w / 2 - ((cols - 1) * gapX) / 2;
+    const startY = vr.y + vr.h / 2 - ((rows - 1) * gapY) / 2;
+    items.forEach((text, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      addNote(startX + col * gapX, startY + row * gapY, text);
+    });
+  }
+
+  // Downscales/recompresses the photo client-side before upload: phone
+  // camera photos can be several MB, and the model doesn't need full
+  // resolution to read a to-do list, so this keeps upload time and API
+  // cost down.
+  function downscaleImageToDataUrl(file, maxDim, quality) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("Couldn't read that photo."));
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  scanBtn.addEventListener("click", () => {
+    if (!MP.visionUrl()) {
+      alert("Multiplayer isn't configured yet, so photo scanning isn't available either — see README.md.");
+      return;
+    }
+    photoInput.value = ""; // allow re-selecting the same file twice in a row
+    photoInput.click();
+  });
+
+  photoInput.addEventListener("change", async () => {
+    const file = photoInput.files && photoInput.files[0];
+    const url = MP.visionUrl();
+    if (!file || !url) return;
+
+    scanBtn.disabled = true;
+    const originalLabel = scanBtn.textContent;
+    scanBtn.textContent = "⏳";
+    try {
+      const dataUrl = await downscaleImageToDataUrl(file, 1600, 0.85);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ image: dataUrl }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Photo scan failed.");
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) {
+        alert("Couldn't find any list items in that photo.");
+        return;
+      }
+      addNotesFromTexts(items);
+    } catch (err) {
+      alert((err && err.message) || "Photo scan failed. Try again.");
+    } finally {
+      scanBtn.disabled = false;
+      scanBtn.textContent = originalLabel;
+    }
   });
 
   boardWrap.addEventListener("dblclick", (e) => {
@@ -925,11 +1015,27 @@
       return (meta && meta.content) || "";
     }
 
-    function wsProtocolFor(host) {
+    function isLocalHost(host) {
       const h = host.split(":")[0];
-      const isLocal =
-        h === "localhost" || h === "127.0.0.1" || h.startsWith("192.168.") || h.startsWith("10.");
-      return isLocal ? "ws" : "wss";
+      return h === "localhost" || h === "127.0.0.1" || h.startsWith("192.168.") || h.startsWith("10.");
+    }
+
+    function wsProtocolFor(host) {
+      return isLocalHost(host) ? "ws" : "wss";
+    }
+
+    function httpProtocolFor(host) {
+      return isLocalHost(host) ? "http" : "https";
+    }
+
+    // Photo-scan requests go over plain HTTP(S), not the WebSocket, so they
+    // need their own URL -- but they're gated the same way as everything
+    // else here: knowing this board's id. Returns null when the worker host
+    // isn't configured, same condition connect() checks.
+    function visionUrl() {
+      const host = workerHost();
+      if (!host || host.includes("YOUR-")) return null;
+      return `${httpProtocolFor(host)}://${host}/board/${boardId}/vision`;
     }
 
     function setConnDot(status, title) {
@@ -1053,6 +1159,7 @@
     return {
       init,
       tick,
+      visionUrl,
       sendCreate: (note) => send({ t: "create", ...note }),
       sendMove: (id, x, y, z) => send({ t: "move", id, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, z }),
       sendUpdate: (id, fields) => send({ t: "update", id, ...fields }),
