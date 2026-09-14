@@ -818,16 +818,11 @@
         sendHtmlUpdate(note.id);
       }
     });
-    el.addEventListener("pointerenter", (e) => {
-      if (e.pointerType !== "mouse") return;
-      hoverNoteId = note.id;
-      showFormatToolbarFor(note.id);
-    });
-    el.addEventListener("pointerleave", (e) => {
-      if (e.pointerType !== "mouse") return;
-      if (hoverNoteId === note.id) hoverNoteId = null;
-      scheduleFormatToolbarHideCheck();
-    });
+    // Double-clicking is how a note enters "edit mode" -- the only time its
+    // format toolbar appears (see enterEditMode). Merely hovering or
+    // single-clicking used to pop the toolbar too, which made it appear
+    // constantly while dragging notes around by their header.
+    editor.addEventListener("dblclick", () => enterEditMode(note.id));
 
     noteEls.set(note.id, { el, header, editor, colorBtn, fieldsRow });
     autofitNoteText(note.id);
@@ -869,6 +864,7 @@
     noteEls.delete(id);
     if (selectedId === id) selectedId = null;
     if (fieldsPopoverNoteId === id) closeNoteFieldsPopover();
+    if (formatTargetId === id) closeFormatToolbar();
   }
 
   function clearAllNotes() {
@@ -1186,9 +1182,18 @@
     selectedId = id;
     bringToFront(id);
     if (noteEls.has(id)) noteEls.get(id).el.classList.add("selected");
-    // Selecting a note is how the format toolbar appears on touch, where
-    // there's no hover signal -- on desktop this just reinforces what
-    // hovering the note already showed (see pointerenter above).
+    // Moving selection to a different note (a click, a drag, a resize) means
+    // we're no longer editing whatever note the toolbar was open for.
+    if (formatTargetId && formatTargetId !== id) closeFormatToolbar();
+  }
+
+  // The only way into "edit mode": double-clicking a note's text (see the
+  // dblclick listener in createNoteElement). This is deliberately separate
+  // from selectNote/focus, which happen on plain single clicks too (for
+  // dragging, resizing, placing a caret to type) -- edit mode is reserved
+  // for when the user actually wants the format toolbar.
+  function enterEditMode(id) {
+    selectNote(id);
     showFormatToolbarFor(id);
   }
 
@@ -1289,9 +1294,9 @@
   // Same idea, but covering the note's whole body rather than just its
   // 20px header strip -- used to anchor the format toolbar, which (unlike
   // the color/fields popovers, still opened by clicking a small header
-  // button) shows on hover alone and is itself often taller/wider than a
-  // small note, so anchoring it to only the header would routinely leave it
-  // overlapping the note's own text underneath.
+  // button) is itself often taller/wider than a small note, so anchoring it
+  // to only the header would routinely leave it overlapping the note's own
+  // text underneath.
   function noteFullScreenRect(id) {
     const note = notes.get(id);
     const wrapRect = boardWrap.getBoundingClientRect();
@@ -1673,15 +1678,9 @@
     }
   });
 
-  // Hovering a note (desktop; see the pointerenter/pointerleave listeners in
-  // createNoteElement) or selecting one (touch tap, or a desktop click --
-  // see selectNote) shows its format toolbar; deliberately never focuses or
-  // touches the editor's own selection itself, since merely moving the
-  // mouse over a note must not yank the caret away from wherever the user
-  // is actually typing.
-  let hoverNoteId = null;
-  let hoverHideTimer = null;
-
+  // Shows the format toolbar for a note -- only ever called by enterEditMode
+  // (double-click), never by hover or plain selection, so it doesn't pop up
+  // while the user is just dragging notes around by their header.
   function showFormatToolbarFor(id) {
     if (!noteEls.has(id)) return;
     if (formatTargetId === id && !formatToolbar.hidden) {
@@ -1695,25 +1694,6 @@
     positionPopoverNear(formatToolbar, noteFullScreenRect(id));
     refreshToolbarState();
   }
-
-  // The toolbar sits visually next to (not inside) the note, so moving the
-  // mouse from one to the other briefly leaves both -- a short grace period,
-  // cancelled by re-entering either, keeps that hop from closing it.
-  function scheduleFormatToolbarHideCheck() {
-    clearTimeout(hoverHideTimer);
-    hoverHideTimer = setTimeout(() => {
-      if (formatTargetId && formatTargetId !== selectedId && formatTargetId !== hoverNoteId) {
-        closeFormatToolbar();
-      }
-    }, 300);
-  }
-
-  formatToolbar.addEventListener("pointerenter", (e) => {
-    if (e.pointerType === "mouse") clearTimeout(hoverHideTimer);
-  });
-  formatToolbar.addEventListener("pointerleave", (e) => {
-    if (e.pointerType === "mouse") scheduleFormatToolbarHideCheck();
-  });
 
   function closeFormatToolbar() {
     formatToolbar.hidden = true;
