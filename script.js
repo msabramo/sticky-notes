@@ -637,6 +637,16 @@
   }
 
   function addNoteLocally(note) {
+    // A reconnect resends the whole board as a fresh "history" message
+    // (see MP.handleMessage), unconditionally, for notes we may already be
+    // tracking -- creating a second DOM element for an id already in
+    // `notes` would leave the first one orphaned (removed from `noteEls`
+    // but never removed from the page), a stuck "ghost" copy nothing can
+    // select or delete. Reconcile onto the existing note/element instead.
+    if (notes.has(note.id)) {
+      applyRemoteNote(note);
+      return;
+    }
     notes.set(note.id, note);
     createNoteElement(note);
     positionNoteEl(note.id);
@@ -1866,11 +1876,21 @@
             if (u && u.connId) onlineConnToUser.set(u.connId, u.id);
           }
           renderPresenceRow();
-          for (const note of msg.notes) {
-            try {
-              addNoteLocally(note);
-            } catch (err) {
-              console.error("Failed to add note from history", note, err);
+          {
+            const seenIds = new Set();
+            for (const note of msg.notes) {
+              seenIds.add(note.id);
+              try {
+                addNoteLocally(note);
+              } catch (err) {
+                console.error("Failed to add note from history", note, err);
+              }
+            }
+            // History is the server's authoritative snapshot -- drop any
+            // note we're still tracking locally that it no longer has (e.g.
+            // deleted by a peer while this connection was reconnecting).
+            for (const id of [...notes.keys()]) {
+              if (!seenIds.has(id)) deleteNote(id);
             }
           }
           break;
