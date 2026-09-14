@@ -10,17 +10,19 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap" />
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=9" />
 </head>
 <body>
   <div class="app">
     <header class="topbar">
       <h1>🗒️ Sticky Notes</h1>
+      <div class="presence-row" id="presenceRow"></div>
       <span class="conn-dot connecting" id="connDot" title="Connecting…"></span>
+      <button id="identityBtn" class="identity-btn" title="Set your name" aria-label="Set your name"></button>
       <button id="menuBtn" class="menu-btn" title="Menu" aria-label="Menu">☰</button>
     </header>
 
-    <main class="board-wrap" id="boardWrap">
+    <main class="board-wrap bg-grid" id="boardWrap">
       <div class="world" id="world">
         <div class="cursors" id="cursors"></div>
       </div>
@@ -28,6 +30,7 @@
       <button class="fab" id="addNoteBtn" title="Add a sticky note">+</button>
       <button class="fab fab-secondary" id="scanBtn" title="Turn a photo of a to-do list into sticky notes">📷</button>
       <input type="file" accept="image/*" capture="environment" id="photoInput" hidden />
+      <input type="file" accept="image/*" id="noteImageInput" hidden />
 
       <div class="zoom-controls no-print">
         <button id="zoomInBtn" class="zoom-btn" title="Zoom in">+</button>
@@ -51,22 +54,52 @@
       <div class="note-fields-popover" id="noteFieldsPopover" hidden></div>
 
       <div class="format-toolbar" id="formatToolbar" hidden>
-        <div class="format-row">
-          <button type="button" class="format-btn" id="fmtBoldBtn" title="Bold"><b>B</b></button>
-          <button type="button" class="format-btn" id="fmtItalicBtn" title="Italic"><i>I</i></button>
-          <button type="button" class="format-btn" id="fmtUnderlineBtn" title="Underline"><u>U</u></button>
-          <select class="format-select" id="fmtHeadingSelect" title="Text style">
-            <option value="P">Normal</option>
-            <option value="H2">Heading</option>
-            <option value="H3">Subheading</option>
-          </select>
-        </div>
-        <div class="format-row">
-          <select class="format-select format-select-wide" id="fmtFontSelect" title="Font"></select>
-          <select class="format-select" id="fmtSizeSelect" title="Size"></select>
-        </div>
+        <select class="format-select format-select-wide" id="fmtFontSelect" title="Font"></select>
+        <select class="format-select" id="fmtSizeSelect" title="Size"></select>
+        <input type="color" class="format-color" id="fmtColorInput" title="Text color" value="#c62828" />
+        <span class="format-sep"></span>
+        <button type="button" class="format-btn" id="fmtBoldBtn" title="Bold"><b>B</b></button>
+        <button type="button" class="format-btn" id="fmtItalicBtn" title="Italic"><i>I</i></button>
+        <button type="button" class="format-btn" id="fmtUnderlineBtn" title="Underline"><u>U</u></button>
+        <button type="button" class="format-btn" id="fmtStrikeBtn" title="Strikethrough"><s>S</s></button>
+        <select class="format-select" id="fmtHeadingSelect" title="Text style">
+          <option value="P">Normal</option>
+          <option value="H2">Heading</option>
+          <option value="H3">Subheading</option>
+        </select>
+        <span class="format-sep"></span>
+        <button type="button" class="format-btn" id="fmtBulletBtn" title="Bullet list">•</button>
+        <button type="button" class="format-btn" id="fmtNumberBtn" title="Numbered list">1.</button>
+        <button type="button" class="format-btn" id="fmtChecklistBtn" title="Checklist">☑</button>
+        <button type="button" class="format-btn" id="fmtLinkBtn" title="Turn selected text into a link">🔗</button>
+        <span class="format-sep"></span>
+        <select class="format-select" id="fmtAlignSelect" title="Alignment">
+          <option value="left">⯇ Left</option>
+          <option value="center">◆ Center</option>
+          <option value="right">⯈ Right</option>
+          <option value="justify">☰ Justify</option>
+        </select>
+        <button type="button" class="format-btn" id="fmtOutdentBtn" title="Decrease indent">⇤</button>
+        <button type="button" class="format-btn" id="fmtIndentBtn" title="Increase indent">⇥</button>
+        <span class="format-sep"></span>
+        <button type="button" class="format-btn" id="fmtImageBtn" title="Insert an image">🖼</button>
       </div>
     </main>
+  </div>
+
+  <div class="identity-popover no-print" id="identityPopover" hidden>
+    <p class="identity-popover-hint">
+      Not an account -- just a name/color so others on this board can tell who's who. Saved in this browser.
+    </p>
+    <label class="identity-field">
+      Name
+      <input type="text" id="identityNameInput" maxlength="24" placeholder="Anonymous" autocomplete="off" />
+    </label>
+    <label class="identity-field">
+      Initials
+      <input type="text" id="identityInitialsInput" maxlength="2" placeholder="??" autocomplete="off" />
+    </label>
+    <div class="identity-color-row" id="identityColorRow"></div>
   </div>
 
   <div class="menu-backdrop no-print" id="menuBackdrop"></div>
@@ -77,6 +110,25 @@
     </div>
     <div class="menu-divider"></div>
     <div class="menu-section">
+      <span class="menu-section-label">Background</span>
+      <div class="bg-swatches" id="bgSwatches">
+        <button type="button" class="bg-swatch" data-bg="grid" title="Grid">
+          <span class="bg-swatch-preview bg-preview-grid"></span>Grid
+        </button>
+        <button type="button" class="bg-swatch" data-bg="whiteboard" title="Whiteboard">
+          <span class="bg-swatch-preview bg-preview-whiteboard"></span>Whiteboard
+        </button>
+        <button type="button" class="bg-swatch" data-bg="chalkboard" title="Chalkboard">
+          <span class="bg-swatch-preview bg-preview-chalkboard"></span>Chalkboard
+        </button>
+        <button type="button" class="bg-swatch" data-bg="pinboard" title="Pinboard">
+          <span class="bg-swatch-preview bg-preview-pinboard"></span>Pinboard
+        </button>
+      </div>
+    </div>
+    <div class="menu-divider"></div>
+    <div class="menu-section">
+      <span class="menu-section-label">Zones</span>
       <button id="createColumnsBtn" class="btn">▥ Create Columns…</button>
       <button id="createColumnsFromFieldBtn" class="btn">🏷▥ Create Columns from Field…</button>
       <button id="drawZoneBtn" class="btn">▭ Draw a Zone</button>
@@ -88,7 +140,7 @@
       <a href="?" id="newBoardLink" class="btn">✨ Start a New Board</a>
     </div>
     <div class="menu-divider"></div>
-    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, and size — select some text first to format just that part. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields). Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Use "Create Columns…" to lay out a kanban-style board (e.g. To do, In progress, Done), or "Draw a Zone" to drag out your own labeled region — tap a zone's label to rename it or its × to remove it, and drag its bottom-right corner to resize it. "Create Columns from Field…" makes one column per option of a select field (e.g. Assignee) and keeps them in sync both ways: drop a note in a column and its field updates to match, or change the field on a note and it hops to that column. Dropped notes auto-stack into an open spot in whichever column or zone they land in — drop near the top, bottom, or between two notes to choose where; hold Option (Alt) while dropping to place a note freely instead. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
+    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color. Hover over a note (or tap/select it on a touch device) to reveal its formatting toolbar: font, size, text color, bold/italic/underline/strikethrough, headings, bullet/numbered/checklist lists, links, alignment, indent, and images — select some text first to format just that part or to turn it into a link; with nothing selected, an inserted image drops in at your cursor. Tap a checklist item's checkbox to check it off. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields — including a Person(s) field that auto-fills from everyone who's used this board, optionally allowing more than one person and/or a freely-typed name for someone not on the board). Tap the circle next to ☰ to set your name, initials, and color so others can tell who's who. Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Use "Create Columns…" to lay out a kanban-style board (e.g. To do, In progress, Done), or "Draw a Zone" to drag out your own labeled region — tap a zone's label to rename it or its × to remove it, and drag its bottom-right corner to resize it. "Create Columns from Field…" makes one column per option of a select field (e.g. Assignee) and keeps them in sync both ways: drop a note in a column and its field updates to match, or change the field on a note and it hops to that column. Dropped notes auto-stack into an open spot in whichever column or zone they land in — drop near the top, bottom, or between two notes to choose where; hold Option (Alt) while dropping to place a note freely instead. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
   </aside>
 
   <div class="fields-modal-backdrop no-print" id="fieldsModalBackdrop"></div>
@@ -104,6 +156,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=7"></script>
+  <script src="script.js?v=9"></script>
 </body>
 </html>

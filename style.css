@@ -66,6 +66,98 @@ body {
 .menu-btn:hover { background: #2a2f3a; }
 .menu-btn:active { transform: scale(0.94); }
 
+/* ---------- Identity (name/initials/color) & presence ---------- */
+.identity-btn {
+  cursor: pointer;
+  border: 2px solid var(--border);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.75);
+  flex-shrink: 0;
+  padding: 0;
+}
+.identity-btn:active { transform: scale(0.94); }
+
+.presence-row {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.presence-avatar {
+  width: 22px;
+  height: 22px;
+  margin-left: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--panel);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.75);
+  flex-shrink: 0;
+}
+.presence-avatar:first-child { margin-left: 0; }
+
+.identity-popover {
+  position: fixed;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  width: 220px;
+}
+.identity-popover[hidden] { display: none; }
+
+.identity-popover-hint {
+  margin: 0 0 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.identity-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.identity-field input {
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  padding: 0 8px;
+}
+#identityInitialsInput { text-transform: uppercase; }
+
+.identity-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.identity-color-opt {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+.identity-color-opt.active { border-color: #fff; }
+.identity-color-opt:hover { transform: scale(1.1); }
+
 .room-label {
   font-size: 13px;
   color: var(--text-dim);
@@ -114,12 +206,47 @@ body {
   position: relative;
   flex: 1;
   overflow: hidden;
-  background: #0e0f12;
-  background-image:
-    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
-  background-size: 40px 40px;
   touch-action: none;
+}
+
+/* Board background types. The board's pick is board-wide state, synced like
+   the custom fields schema (see MP.sendBackground / the "background"
+   message) so everyone viewing the board sees the same one. */
+.board-wrap.bg-grid {
+  background-color: #0e0f12;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.board-wrap.bg-whiteboard {
+  background-color: #f5f5f2;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.board-wrap.bg-chalkboard {
+  background-color: #22392b;
+  background-image:
+    radial-gradient(circle at 18% 28%, rgba(255, 255, 255, 0.035) 0, transparent 40%),
+    radial-gradient(circle at 78% 68%, rgba(255, 255, 255, 0.03) 0, transparent 45%),
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+}
+
+.board-wrap.bg-pinboard {
+  background-color: #b8895b;
+  background-image:
+    repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.06) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.06) 0 1px, transparent 1px 7px),
+    radial-gradient(circle at 30% 20%, rgba(0, 0, 0, 0.1) 0 2px, transparent 2px),
+    radial-gradient(circle at 65% 55%, rgba(0, 0, 0, 0.08) 0 1.5px, transparent 1.5px),
+    radial-gradient(circle at 15% 75%, rgba(0, 0, 0, 0.08) 0 1.5px, transparent 1.5px);
+  background-size: 10px 10px, 10px 10px, 34px 34px, 27px 27px, 41px 41px;
 }
 
 .world {
@@ -147,6 +274,21 @@ body {
   transform: translate(-2px, -2px) rotate(-45deg);
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
 }
+
+.remote-cursor-label {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  transform: rotate(45deg);
+  background: rgba(20, 22, 26, 0.85);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.remote-cursor-label:empty { display: none; }
 
 /* ---------- Zones (columns / custom regions) ---------- */
 .zone {
@@ -301,6 +443,70 @@ body {
 .note-text h1 { font-size: 1.5em; }
 .note-text h2 { font-size: 1.25em; }
 .note-text h3 { font-size: 1.05em; }
+.note-text ul, .note-text ol {
+  margin: 2px 0;
+  padding-left: 1.3em;
+}
+.note-text li { margin: 1px 0; }
+.note-text s, .note-text strike { text-decoration: line-through; }
+.note-text a {
+  color: #1a54b8;
+  text-decoration: underline;
+}
+
+/* A checklist item's checkbox is drawn (not a real <input>, which
+   contenteditable would fight over) as a ::before box. It's positioned
+   inside the <li>'s own padding-left (not the <ul>'s, and not a negative
+   offset outside the li) specifically so a click there lands on the li at
+   a *non-negative* offsetX -- the mousedown handler in createNoteElement
+   (script.js) hit-tests against that same padding width to decide whether
+   a click toggles data-checked instead of placing a text caret. */
+.note-text ul.checklist {
+  list-style: none;
+  padding-left: 0;
+}
+.note-text ul.checklist li {
+  position: relative;
+  padding-left: 1.7em;
+}
+.note-text ul.checklist li::before {
+  content: "";
+  position: absolute;
+  left: 0.15em;
+  top: 0.2em;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.note-text ul.checklist li[data-checked="true"]::before {
+  background: currentColor;
+}
+.note-text ul.checklist li[data-checked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0.38em;
+  top: 0.38em;
+  width: 0.4em;
+  height: 0.2em;
+  border-left: 2px solid rgba(255, 255, 255, 0.92);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.92);
+  transform: rotate(-45deg);
+  pointer-events: none;
+}
+.note-text ul.checklist li[data-checked="true"] {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+.note-text img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 4px 0;
+}
 
 .note.selected {
   outline: 2px solid rgba(255, 255, 255, 0.6);
@@ -379,24 +585,34 @@ body {
 }
 .color-opt:hover { transform: scale(1.1); }
 
-/* ---------- Format toolbar ---------- */
+/* ---------- Format toolbar ----------
+   A single flex-wrap row (wraps onto a second/third line on narrow
+   screens rather than needing its own responsive breakpoints) that shows
+   itself when the pointer hovers a note, or the note is selected (see
+   showFormatToolbarFor/selectNote in script.js) -- there's no dedicated
+   trigger button on the note itself anymore. */
 .format-toolbar {
   position: absolute;
   z-index: 5;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  padding: 8px;
+  padding: 6px 8px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  width: 240px;
+  width: max-content;
+  max-width: min(520px, 92vw);
 }
 
-.format-row {
-  display: flex;
-  gap: 6px;
+.format-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 22px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
 .format-btn {
@@ -413,10 +629,10 @@ body {
 }
 .format-btn:hover { background: #2a2f3a; }
 .format-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.format-btn.disabled { opacity: 0.35; cursor: default; }
+.format-btn.disabled:hover { background: var(--panel-2); }
 
 .format-select {
-  flex: 1;
-  min-width: 0;
   height: 30px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -424,8 +640,21 @@ body {
   color: var(--text);
   font-size: 12px;
   padding: 0 4px;
+  flex-shrink: 0;
 }
-.format-select-wide { flex: 2; }
+.format-select-wide { width: 110px; }
+#fmtAlignSelect { width: 84px; }
+
+.format-color {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  padding: 2px;
+  cursor: pointer;
+}
 
 /* ---------- Note fields (custom metadata) ---------- */
 .note-fields-row {
@@ -449,6 +678,82 @@ body {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.user-chip-avatar {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 6.5px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.75);
+}
+/* A freely-typed name isn't a real identity -- dashed instead of solid,
+   and the name itself in italics, to mark it as such at a glance. */
+.user-chip-freetext .user-chip-avatar {
+  border: 1px dashed rgba(0, 0, 0, 0.5);
+}
+.user-chip-freetext {
+  font-style: italic;
+}
+
+/* ---------- "Person(s)" field editor (per-note popover) ---------- */
+.user-field-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.user-field-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.user-field-selected .user-chip {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  padding: 2px 4px 2px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+.user-field-selected .user-chip-avatar {
+  width: 14px;
+  height: 14px;
+  font-size: 8px;
+}
+.chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+}
+.chip-remove:hover { color: var(--text); }
+
+.user-field-freetext-row {
+  display: flex;
+  gap: 6px;
+}
+.user-field-freetext-row input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 6px;
 }
 
 /* ---------- Per-note fields popover ---------- */
@@ -653,6 +958,28 @@ body {
   font-size: 12px;
   padding: 0 6px;
 }
+
+.field-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.field-checkbox-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.field-checkbox-row select {
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+}
+
 .color-swatch {
   width: 22px;
   height: 22px;
@@ -769,6 +1096,73 @@ body {
   color: var(--text-dim);
   line-height: 1.5;
   margin: 0;
+}
+
+.menu-section-label {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bg-swatches {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.bg-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.bg-swatch:hover { background: #2a2f3a; }
+.bg-swatch.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+
+.bg-swatch-preview {
+  width: 100%;
+  height: 32px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.bg-preview-grid {
+  background-color: #0e0f12;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.bg-preview-whiteboard {
+  background-color: #f5f5f2;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.bg-preview-chalkboard {
+  background-color: #22392b;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.bg-preview-pinboard {
+  background-color: #b8895b;
+  background-image:
+    repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.08) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.08) 0 1px, transparent 1px 4px);
 }
 
 @media (max-width: 480px) {

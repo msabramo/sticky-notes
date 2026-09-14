@@ -23,7 +23,8 @@ import { DurableObject } from "cloudflare:workers";
  * `fields` is an opaque object of board-defined custom metadata values
  * (e.g. status/assignee/tags) keyed by field id, merged into the note like
  * any other property -- see the `fields` message below for the definitions
- * those ids refer to.
+ * those ids refer to. A "person" field's value is a user id, resolved
+ * against the roster below.
  *   delete: { t: "delete", id }
  *   clear:  { t: "clear" }
  *   cursor: { t: "cursor", x, y, color }  (never persisted)
@@ -31,8 +32,26 @@ import { DurableObject } from "cloudflare:workers";
  *     field schema (an array the client defines: name/type/options per
  *     field). Stored separately from notes so "clear" (which only wipes
  *     notes) leaves field definitions in place. A new connection receives
- *     the current schema alongside note history: { t: "history", notes,
- *     fields }.
+ *     the current schema alongside note (and zone) history: { t: "history",
+ *     notes, zones, fields, users, online, background }.
+ *   identity: { t: "identity", id, name, initials, color } -- a per-browser
+ *     display identity (see script.js), not an account: no password, no
+ *     server-side verification, just whatever the sending client claims.
+ *     Sent once when a connection opens and again whenever the user edits
+ *     their name/initials/color. Stored under a separate key, keyed by the
+ *     client-generated user id, so the board accumulates a roster of
+ *     everyone who's used it (`users` in the history message) -- this is
+ *     what lets a "Person" custom field offer a dropdown of the board's
+ *     users instead of free text. The connection's live attachment also
+ *     tracks the identity of whoever is on the other end of it, so a new
+ *     connection's history message can report who's online *right now*
+ *     (`online`, each entry carrying the sending connection's id as
+ *     `connId` so peers can map it to "leave" events) as opposed to merely
+ *     who has ever visited.
+ *   background: { t: "background", background }  -- sets the board's
+ *     background type (a string id like "grid"/"whiteboard"/"chalkboard"/
+ *     "pinboard", opaque to the server). Stored like `fields`, separately
+ *     from notes, and included in the history payload as `background`.
  *
  * Zones (labeled rectangular regions, e.g. kanban columns) reuse the same
  * create/move/update/delete verbs with `kind: "zone"` added, so they're
@@ -61,16 +80,20 @@ interface Env {
 
 const NOTE_PREFIX = "note:";
 const ZONE_PREFIX = "zone:";
+const USER_PREFIX = "user:";
 const FIELDS_KEY = "schema:fields";
+const BACKGROUND_KEY = "schema:background";
 const MAX_NOTES = 2000;
 const MAX_ZONES = 200;
+const MAX_USERS = 500;
 const VISION_DAILY_LIMIT = 30;
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
-type ConnAttachment = { id: string };
+type Identity = { id: string } & Record<string, unknown>;
+type ConnAttachment = { id: string; identity?: Identity };
 type Note = { id: string } & Record<string, unknown>;
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -150,14 +173,34 @@ export class NotesBoard extends DurableObject<Env> {
     server.serializeAttachment({ id } satisfies ConnAttachment);
     this.ctx.acceptWebSocket(server);
 
-    const [storedNotes, storedZones, fields] = await Promise.all([
+    const [storedNotes, storedZones, fields, storedUsers, background] = await Promise.all([
       this.ctx.storage.list({ prefix: NOTE_PREFIX }),
       this.ctx.storage.list({ prefix: ZONE_PREFIX }),
       this.ctx.storage.get(FIELDS_KEY) as Promise<unknown[] | undefined>,
+      this.ctx.storage.list({ prefix: USER_PREFIX }),
+      this.ctx.storage.get(BACKGROUND_KEY) as Promise<string | undefined>,
     ]);
     const notes = [...storedNotes.values()];
     const zones = [...storedZones.values()];
-    server.send(JSON.stringify({ t: "history", notes, zones, fields: fields || [] }));
+    const users = [...storedUsers.values()];
+    const online = this.ctx
+      .getWebSockets()
+      .map((s) => {
+        const att = s.deserializeAttachment() as ConnAttachment | null;
+        return att && att.identity ? { ...att.identity, connId: att.id } : null;
+      })
+      .filter(Boolean);
+    server.send(
+      JSON.stringify({
+        t: "history",
+        notes,
+        zones,
+        fields: fields || [],
+        users,
+        online,
+        background: background || "grid",
+      })
+    );
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -250,6 +293,24 @@ export class NotesBoard extends DurableObject<Env> {
       case "fields": {
         const fields = Array.isArray(data.fields) ? data.fields : [];
         await this.ctx.storage.put(FIELDS_KEY, fields);
+        this.broadcast(out, senderId);
+        break;
+      }
+      case "identity": {
+        const userId = noteId;
+        if (!userId) return;
+        const attachment = (ws.deserializeAttachment() as ConnAttachment) || { id: senderId };
+        ws.serializeAttachment({ ...attachment, identity: data as Identity });
+        const known = await this.ctx.storage.get(USER_PREFIX + userId);
+        if (known || (await this.ctx.storage.list({ prefix: USER_PREFIX })).size < MAX_USERS) {
+          await this.ctx.storage.put(USER_PREFIX + userId, data as Identity);
+        }
+        this.broadcast(out, senderId);
+        break;
+      }
+      case "background": {
+        const background = typeof data.background === "string" ? data.background : "grid";
+        await this.ctx.storage.put(BACKGROUND_KEY, background);
         this.broadcast(out, senderId);
         break;
       }

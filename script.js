@@ -28,6 +28,17 @@
   const fmtHeadingSelect = document.getElementById("fmtHeadingSelect");
   const fmtFontSelect = document.getElementById("fmtFontSelect");
   const fmtSizeSelect = document.getElementById("fmtSizeSelect");
+  const fmtColorInput = document.getElementById("fmtColorInput");
+  const fmtStrikeBtn = document.getElementById("fmtStrikeBtn");
+  const fmtBulletBtn = document.getElementById("fmtBulletBtn");
+  const fmtNumberBtn = document.getElementById("fmtNumberBtn");
+  const fmtChecklistBtn = document.getElementById("fmtChecklistBtn");
+  const fmtLinkBtn = document.getElementById("fmtLinkBtn");
+  const fmtAlignSelect = document.getElementById("fmtAlignSelect");
+  const fmtIndentBtn = document.getElementById("fmtIndentBtn");
+  const fmtOutdentBtn = document.getElementById("fmtOutdentBtn");
+  const fmtImageBtn = document.getElementById("fmtImageBtn");
+  const noteImageInput = document.getElementById("noteImageInput");
   const noteFieldsPopover = document.getElementById("noteFieldsPopover");
   const manageFieldsBtn = document.getElementById("manageFieldsBtn");
   const fieldsModalBackdrop = document.getElementById("fieldsModalBackdrop");
@@ -36,6 +47,13 @@
   const fieldsList = document.getElementById("fieldsList");
   const fieldsPresets = document.getElementById("fieldsPresets");
   const addFieldBtn = document.getElementById("addFieldBtn");
+  const identityBtn = document.getElementById("identityBtn");
+  const identityPopover = document.getElementById("identityPopover");
+  const identityNameInput = document.getElementById("identityNameInput");
+  const identityInitialsInput = document.getElementById("identityInitialsInput");
+  const identityColorRow = document.getElementById("identityColorRow");
+  const presenceRow = document.getElementById("presenceRow");
+  const bgSwatches = document.getElementById("bgSwatches");
 
   const WORLD_W = 3000;
   const WORLD_H = 2000;
@@ -55,6 +73,12 @@
   const ZONE_STACK_GAP = 12; // gap between consecutively stacked notes
   const COLORS = ["#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8"];
   const CURSOR_COLORS = ["#ff6b3d", "#4dd0e1", "#ff4d4f", "#8bc34a", "#ba68c8", "#ffd54f"];
+  // How far into a checklist <li>'s left padding (where its CSS-drawn
+  // checkbox lives, in style.css) a click still counts as toggling the box
+  // rather than placing a text caret -- kept as an em multiple, not a fixed
+  // pixel count, since note text is autofit-scaled anywhere from 13px to
+  // 64px. Must match ul.checklist li's padding-left in style.css.
+  const CHECKLIST_BOX_EM = 1.7;
 
   // Real font names, mapped to a stack with sensible cross-platform fallbacks.
   // Also doubles as the allowlist the HTML sanitizer checks font-family values against.
@@ -86,12 +110,23 @@
   // validate anything -- so any HTML from a remote peer (or from a board's
   // stored history) must be sanitized before it's ever assigned to innerHTML,
   // otherwise one malicious peer could run script in every other viewer's tab.
-  const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "SPAN", "BR", "DIV", "H1", "H2", "H3", "P"]);
-  const DROP_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "IMG", "SVG", "TEMPLATE"]);
+  const ALLOWED_TAGS = new Set([
+    "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "SPAN", "BR", "DIV", "H1", "H2", "H3", "P", "A", "IMG", "UL", "OL", "LI",
+  ]);
+  const DROP_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "SVG", "TEMPLATE"]);
   const FONT_SIZE_RE = /^(1[0-9]|[2-9][0-9]|1[0-4][0-9])px$/;
   const FONT_WEIGHT_RE = /^(bold|normal|[1-9]00)$/;
   const FONT_STYLE_RE = /^(italic|normal)$/;
-  const TEXT_DECORATION_RE = /^(underline|none)$/;
+  const TEXT_DECORATION_RE = /^(underline|line-through|none)$/;
+  const TEXT_ALIGN_RE = /^(left|center|right|justify)$/;
+  const COLOR_RE = /^(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\))$/;
+  // Only http(s)/mailto links: anything else (javascript:, data:, etc.) could
+  // run script or otherwise misbehave when clicked.
+  const SAFE_HREF_RE = /^(https?:|mailto:)\S+$/i;
+  // Images may only be same-document data: URIs, never a remote src -- an
+  // <img src="https://..."> would silently phone home to a third party (and
+  // leak the viewer's IP) the instant anyone merely opens the board.
+  const SAFE_IMG_SRC_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
 
   function sanitizeStyle(styleText) {
     const out = [];
@@ -105,8 +140,29 @@
       else if (prop === "font-weight" && FONT_WEIGHT_RE.test(value)) out.push(`font-weight:${value}`);
       else if (prop === "font-style" && FONT_STYLE_RE.test(value)) out.push(`font-style:${value}`);
       else if (prop === "text-decoration" && TEXT_DECORATION_RE.test(value)) out.push(`text-decoration:${value}`);
+      else if (prop === "color" && COLOR_RE.test(value)) out.push(`color:${value}`);
+      else if (prop === "text-align" && TEXT_ALIGN_RE.test(value)) out.push(`text-align:${value}`);
     }
     return out.join(";");
+  }
+
+  function sanitizeStyledElement(node) {
+    const styleAttr = node.getAttribute("style");
+    for (const attr of [...node.attributes]) node.removeAttribute(attr.name);
+    if (styleAttr) {
+      const clean = sanitizeStyle(styleAttr);
+      if (clean) node.setAttribute("style", clean);
+    }
+  }
+
+  // Drops a wrapper element but keeps its (already-sanitized) children --
+  // used for tags this app doesn't allow, and for an <a>/<img> whose only
+  // attribute (href/src) failed validation, so the link/image disappears but
+  // the surrounding text a peer typed doesn't.
+  function unwrapElement(parent, node) {
+    sanitizeWalk(node);
+    while (node.firstChild) parent.insertBefore(node.firstChild, node);
+    parent.removeChild(node);
   }
 
   function sanitizeWalk(parent) {
@@ -118,16 +174,46 @@
         if (DROP_TAGS.has(tag)) {
           node.remove();
         } else if (!ALLOWED_TAGS.has(tag)) {
-          sanitizeWalk(node);
-          while (node.firstChild) parent.insertBefore(node.firstChild, node);
-          parent.removeChild(node);
-        } else {
-          const styleAttr = node.getAttribute("style");
-          for (const attr of [...node.attributes]) node.removeAttribute(attr.name);
-          if (styleAttr) {
-            const clean = sanitizeStyle(styleAttr);
-            if (clean) node.setAttribute("style", clean);
+          unwrapElement(parent, node);
+        } else if (tag === "A") {
+          const href = (node.getAttribute("href") || "").trim();
+          if (SAFE_HREF_RE.test(href)) {
+            sanitizeStyledElement(node);
+            node.setAttribute("href", href);
+            // Always force these, regardless of what a peer's HTML carried --
+            // contenteditable links only need to *look* like links; actually
+            // following one should never happen without the safety of a new,
+            // unprivileged tab.
+            node.setAttribute("target", "_blank");
+            node.setAttribute("rel", "noopener noreferrer");
+            sanitizeWalk(node);
+          } else {
+            unwrapElement(parent, node);
           }
+        } else if (tag === "IMG") {
+          const src = (node.getAttribute("src") || "").trim();
+          if (SAFE_IMG_SRC_RE.test(src)) {
+            for (const attr of [...node.attributes]) node.removeAttribute(attr.name);
+            node.setAttribute("src", src);
+            node.setAttribute("alt", "");
+          } else {
+            node.remove();
+          }
+        } else if (tag === "UL") {
+          // The only class this app ever writes is the literal string
+          // "checklist" (see applyChecklist) -- anything else is dropped
+          // rather than let a peer's HTML smuggle an arbitrary class name in.
+          const isChecklist = node.getAttribute("class") === "checklist";
+          sanitizeStyledElement(node);
+          if (isChecklist) node.setAttribute("class", "checklist");
+          sanitizeWalk(node);
+        } else if (tag === "LI") {
+          const checked = node.getAttribute("data-checked");
+          sanitizeStyledElement(node);
+          if (checked === "true" || checked === "false") node.setAttribute("data-checked", checked);
+          sanitizeWalk(node);
+        } else {
+          sanitizeStyledElement(node);
           sanitizeWalk(node);
         }
       } else if (node.nodeType !== Node.TEXT_NODE) {
@@ -163,6 +249,189 @@
     // Avoids crypto.randomUUID for wider WebKit/webview compatibility.
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
   }
+
+  // ---------- Local identity (name, initials, color) ----------
+  // Still no accounts (see README) -- this is a per-browser display
+  // identity, entirely client-chosen and unauthenticated: no password, no
+  // server-side verification, just whatever this client claims. It's what
+  // lets peers tell each other apart (live cursor labels, a presence row of
+  // who's currently on the board) and what a "Person" custom field's
+  // dropdown is built from. Persisted in localStorage so it survives
+  // reloads, and broadcast to the board's Durable Object -- which keeps a
+  // roster of everyone who's ever used it -- whenever it's set or changed.
+  const IDENTITY_KEY = "sticky-notes:identity";
+  const USER_ID_KEY = "sticky-notes:userId";
+
+  function loadOrCreateUserId() {
+    try {
+      let id = localStorage.getItem(USER_ID_KEY);
+      if (!id) {
+        id = makeId();
+        localStorage.setItem(USER_ID_KEY, id);
+      }
+      return id;
+    } catch (err) {
+      return makeId(); // storage unavailable (private mode, etc.) -- session-only id
+    }
+  }
+
+  function initialsFrom(name) {
+    const words = name.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return "?";
+    if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+    return (words[0][0] + words[1][0]).toUpperCase();
+  }
+
+  function loadIdentity() {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(IDENTITY_KEY) || "null");
+    } catch (err) { /* malformed or unavailable storage -- fall back to defaults */ }
+    const color =
+      saved && typeof saved.color === "string" && CURSOR_COLORS.includes(saved.color)
+        ? saved.color
+        : CURSOR_COLORS[Math.floor(Math.random() * CURSOR_COLORS.length)];
+    const name = saved && typeof saved.name === "string" ? saved.name.trim().slice(0, 24) : "";
+    const initials =
+      saved && typeof saved.initials === "string" && saved.initials.trim()
+        ? saved.initials.trim().slice(0, 2).toUpperCase()
+        : initialsFrom(name);
+    return { name, initials, color };
+  }
+
+  const myUserId = loadOrCreateUserId();
+  const myIdentity = loadIdentity();
+
+  function saveIdentity() {
+    try {
+      localStorage.setItem(IDENTITY_KEY, JSON.stringify(myIdentity));
+    } catch (err) { /* private mode / storage full -- identity just won't persist */ }
+  }
+
+  // userId -> { name, initials, color }, board-wide; everyone who has ever
+  // opened this board (named themselves or not) ends up in here, since
+  // identity is broadcast once on every connect -- see MP.sendIdentity.
+  const roster = new Map();
+  // connection id -> userId, for whoever's connected *right now* -- drives
+  // the presence row and remote cursor labels. Cleared/rebuilt on
+  // (re)connect, updated live via "identity"/"leave" messages.
+  const onlineConnToUser = new Map();
+
+  function applyRosterEntry(u) {
+    if (!u || typeof u.id !== "string" || !u.id) return;
+    roster.set(u.id, {
+      name: typeof u.name === "string" ? u.name.trim().slice(0, 24) : "",
+      initials:
+        typeof u.initials === "string" && u.initials.trim() ? u.initials.trim().slice(0, 2).toUpperCase() : "?",
+      color: typeof u.color === "string" && CURSOR_COLORS.includes(u.color) ? u.color : CURSOR_COLORS[0],
+    });
+  }
+
+  applyRosterEntry({ id: myUserId, ...myIdentity });
+
+  function renderIdentityButton() {
+    if (!identityBtn) return;
+    identityBtn.textContent = myIdentity.initials;
+    identityBtn.style.background = myIdentity.color;
+    identityBtn.title = myIdentity.name ? `You: ${myIdentity.name} (click to edit)` : "Set your name";
+  }
+
+  function renderPresenceRow() {
+    if (!presenceRow) return;
+    presenceRow.innerHTML = "";
+    const seen = new Set();
+    const addAvatar = (userId) => {
+      if (seen.has(userId)) return;
+      seen.add(userId);
+      const u = roster.get(userId) || { name: "", initials: "?", color: CURSOR_COLORS[0] };
+      const el = document.createElement("span");
+      el.className = "presence-avatar";
+      el.style.background = u.color;
+      el.textContent = u.initials;
+      el.title = u.name || "Anonymous";
+      presenceRow.appendChild(el);
+    };
+    addAvatar(myUserId);
+    for (const userId of onlineConnToUser.values()) addAvatar(userId);
+  }
+
+  function commitIdentity() {
+    saveIdentity();
+    applyRosterEntry({ id: myUserId, ...myIdentity });
+    renderIdentityButton();
+    renderPresenceRow();
+    MP.sendIdentity();
+    renderAllNoteFieldRows();
+    if (fieldsPopoverNoteId) renderNoteFieldsPopoverContent(fieldsPopoverNoteId);
+  }
+
+  function renderIdentityColorRow() {
+    if (!identityColorRow) return;
+    identityColorRow.innerHTML = "";
+    for (const c of CURSOR_COLORS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "identity-color-opt" + (c === myIdentity.color ? " active" : "");
+      btn.style.background = c;
+      btn.addEventListener("click", () => {
+        myIdentity.color = c;
+        commitIdentity();
+        renderIdentityColorRow();
+      });
+      identityColorRow.appendChild(btn);
+    }
+  }
+
+  function openIdentityPopover() {
+    closeMenu();
+    closeColorPopover();
+    closeFormatToolbar();
+    closeNoteFieldsPopover();
+    identityNameInput.value = myIdentity.name;
+    // Leave the initials input blank (showing its "??" placeholder) unless
+    // the current initials were a deliberate override -- otherwise it'd
+    // look pre-filled and the name-change handler below would treat that
+    // as "already customized" and stop auto-deriving from the name.
+    identityInitialsInput.value = myIdentity.initials === initialsFrom(myIdentity.name) ? "" : myIdentity.initials;
+    renderIdentityColorRow();
+    identityPopover.hidden = false;
+    const rect = identityBtn.getBoundingClientRect();
+    identityPopover.style.top = rect.bottom + 6 + "px";
+    identityPopover.style.right = Math.max(4, window.innerWidth - rect.right) + "px";
+  }
+  function closeIdentityPopover() {
+    identityPopover.hidden = true;
+  }
+
+  if (identityBtn) {
+    identityBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      identityPopover.hidden ? openIdentityPopover() : closeIdentityPopover();
+    });
+    document.addEventListener("click", (e) => {
+      if (!identityPopover.hidden && !identityPopover.contains(e.target) && e.target !== identityBtn) {
+        closeIdentityPopover();
+      }
+    });
+    identityNameInput.addEventListener("change", () => {
+      const hadNoInitials = !identityInitialsInput.value.trim();
+      myIdentity.name = identityNameInput.value.trim().slice(0, 24);
+      if (hadNoInitials) {
+        myIdentity.initials = initialsFrom(myIdentity.name);
+        identityInitialsInput.value = myIdentity.initials;
+      }
+      commitIdentity();
+    });
+    identityInitialsInput.addEventListener("change", () => {
+      const v = identityInitialsInput.value.trim().slice(0, 2).toUpperCase();
+      myIdentity.initials = v || initialsFrom(myIdentity.name);
+      identityInitialsInput.value = myIdentity.initials;
+      commitIdentity();
+    });
+  }
+
+  renderIdentityButton();
+  renderPresenceRow();
 
   // A handwriting font still looks too uniform if every note leans the exact
   // same way, so each note gets a small deterministic (hash of its id, so it
@@ -306,6 +575,7 @@
 
   // ---------- Hamburger menu ----------
   function openMenu() {
+    closeIdentityPopover();
     menuDrawer.classList.add("open");
     menuBackdrop.classList.add("open");
   }
@@ -337,6 +607,43 @@
     MP.sendClear();
     closeMenu();
   });
+
+  // ---------- Board background ----------
+  // Like the custom fields schema, the chosen background is board-wide state
+  // synced to every peer (see MP.sendBackground / the "background" message)
+  // rather than a per-viewer preference, so everyone sees the same board.
+  const BOARD_BACKGROUNDS = ["grid", "whiteboard", "chalkboard", "pinboard"];
+  let boardBackground = "grid";
+
+  function normalizeBackground(bg) {
+    return BOARD_BACKGROUNDS.includes(bg) ? bg : "grid";
+  }
+
+  function applyBoardBackground(bg) {
+    boardBackground = normalizeBackground(bg);
+    boardWrap.classList.remove(...BOARD_BACKGROUNDS.map((b) => "bg-" + b));
+    boardWrap.classList.add("bg-" + boardBackground);
+    if (bgSwatches) {
+      for (const btn of bgSwatches.querySelectorAll(".bg-swatch")) {
+        btn.classList.toggle("active", btn.dataset.bg === boardBackground);
+      }
+    }
+  }
+
+  function applyRemoteBackground(bg) {
+    applyBoardBackground(bg);
+  }
+
+  if (bgSwatches) {
+    bgSwatches.addEventListener("click", (e) => {
+      const btn = e.target.closest(".bg-swatch");
+      if (!btn) return;
+      applyBoardBackground(btn.dataset.bg);
+      MP.sendBackground(boardBackground);
+    });
+  }
+
+  applyBoardBackground(boardBackground);
 
   // Lays out `count` equal-width columns spanning the whole board, used by
   // both "Create Columns..." (arbitrary names) and "Create Columns from
@@ -424,10 +731,6 @@
     const colorBtn = document.createElement("button");
     colorBtn.textContent = "●";
     colorBtn.title = "Color";
-    const fontBtn = document.createElement("button");
-    fontBtn.textContent = "Aa";
-    fontBtn.title = "Format text";
-    fontBtn.style.fontSize = "10px";
     const fieldsBtn = document.createElement("button");
     fieldsBtn.textContent = "🏷";
     fieldsBtn.title = "Fields";
@@ -436,7 +739,6 @@
     delBtn.textContent = "×";
     delBtn.title = "Delete";
     header.appendChild(colorBtn);
-    header.appendChild(fontBtn);
     header.appendChild(fieldsBtn);
     header.appendChild(delBtn);
 
@@ -467,10 +769,6 @@
       e.stopPropagation();
       openColorPopover(note.id);
     });
-    fontBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openFormatToolbar(note.id);
-    });
     fieldsBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       openNoteFieldsPopover(note.id);
@@ -500,6 +798,36 @@
       const text = (e.clipboardData || window.clipboardData).getData("text/plain");
       document.execCommand("insertText", false, text);
     });
+    // Checklist items store their checked state as a data attribute (see
+    // applyChecklist) rather than a real <input type="checkbox">, so there's
+    // nothing for contenteditable to fight over -- clicking the rendered
+    // checkbox (a ::before box drawn inside the <li>'s own CHECKLIST_BOX_EM
+    // of left padding, matching the CSS, so offsetX there is never negative)
+    // just flips the attribute instead of placing a caret there. The hit
+    // width is computed from the li's current (autofit-scaled) font-size
+    // rather than a fixed pixel constant, since note text can render
+    // anywhere from 13px to 64px.
+    editor.addEventListener("mousedown", (e) => {
+      const li = e.target.closest("li");
+      if (!li || !li.closest("ul.checklist") || !editor.contains(li)) return;
+      const hitWidth = parseFloat(getComputedStyle(li).fontSize) * CHECKLIST_BOX_EM;
+      if (e.offsetX >= 0 && e.offsetX < hitWidth) {
+        e.preventDefault();
+        const checked = li.getAttribute("data-checked") === "true";
+        li.setAttribute("data-checked", checked ? "false" : "true");
+        sendHtmlUpdate(note.id);
+      }
+    });
+    el.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "mouse") return;
+      hoverNoteId = note.id;
+      showFormatToolbarFor(note.id);
+    });
+    el.addEventListener("pointerleave", (e) => {
+      if (e.pointerType !== "mouse") return;
+      if (hoverNoteId === note.id) hoverNoteId = null;
+      scheduleFormatToolbarHideCheck();
+    });
 
     noteEls.set(note.id, { el, header, editor, colorBtn, fieldsRow });
     autofitNoteText(note.id);
@@ -517,6 +845,16 @@
   }
 
   function addNoteLocally(note) {
+    // A reconnect resends the whole board as a fresh "history" message
+    // (see MP.handleMessage), unconditionally, for notes we may already be
+    // tracking -- creating a second DOM element for an id already in
+    // `notes` would leave the first one orphaned (removed from `noteEls`
+    // but never removed from the page), a stuck "ghost" copy nothing can
+    // select or delete. Reconcile onto the existing note/element instead.
+    if (notes.has(note.id)) {
+      applyRemoteNote(note);
+      return;
+    }
     notes.set(note.id, note);
     createNoteElement(note);
     positionNoteEl(note.id);
@@ -848,6 +1186,10 @@
     selectedId = id;
     bringToFront(id);
     if (noteEls.has(id)) noteEls.get(id).el.classList.add("selected");
+    // Selecting a note is how the format toolbar appears on touch, where
+    // there's no hover signal -- on desktop this just reinforces what
+    // hovering the note already showed (see pointerenter above).
+    showFormatToolbarFor(id);
   }
 
   function deselectNote() {
@@ -944,14 +1286,32 @@
     };
   }
 
-  // Positions a popover under a note's header, flipping above it instead of
-  // clamping in place when there isn't room below -- clamping alone can push
-  // a tall popover (the format toolbar) up far enough to overlap the very
-  // button row it was opened from.
-  function positionPopoverNear(popoverEl, id) {
+  // Same idea, but covering the note's whole body rather than just its
+  // 20px header strip -- used to anchor the format toolbar, which (unlike
+  // the color/fields popovers, still opened by clicking a small header
+  // button) shows on hover alone and is itself often taller/wider than a
+  // small note, so anchoring it to only the header would routinely leave it
+  // overlapping the note's own text underneath.
+  function noteFullScreenRect(id) {
+    const note = notes.get(id);
+    const wrapRect = boardWrap.getBoundingClientRect();
+    const left = wrapRect.left + (note.x - camera.x) * camera.scale;
+    const top = wrapRect.top + (note.y - camera.y) * camera.scale;
+    return {
+      left,
+      top,
+      right: left + note.w * camera.scale,
+      bottom: top + note.h * camera.scale,
+    };
+  }
+
+  // Positions a popover just outside `anchorRect` (below it if there's room,
+  // above it otherwise) rather than clamping in place when there isn't --
+  // clamping alone can push a tall popover up far enough to overlap the very
+  // element it was anchored to.
+  function positionPopoverNear(popoverEl, anchorRect) {
     popoverEl.hidden = false; // must be visible/laid out to measure
     const { width, height } = popoverEl.getBoundingClientRect();
-    const anchorRect = noteHeaderScreenRect(id);
     const wrapRect = boardWrap.getBoundingClientRect();
     const left = clamp(anchorRect.left - wrapRect.left, 4, wrapRect.width - width - 4);
     const spaceBelow = wrapRect.height - (anchorRect.bottom - wrapRect.top);
@@ -969,8 +1329,9 @@
     if (!colorPopover.hidden && colorTargetId === id) { closeColorPopover(); return; }
     closeFormatToolbar();
     closeNoteFieldsPopover();
+    closeIdentityPopover();
     colorTargetId = id;
-    positionPopoverNear(colorPopover, id);
+    positionPopoverNear(colorPopover, noteHeaderScreenRect(id));
   }
   function closeColorPopover() {
     colorPopover.hidden = true;
@@ -1039,14 +1400,41 @@
     sendHtmlUpdate(formatTargetId);
   }
 
+  // Returns the <li> the current selection is inside, scoped to `editor` --
+  // used to gate list-only commands (checklist active-state, indent/outdent)
+  // so they only ever act on a real in-list cursor position, never on
+  // whatever ensureEditableSelection's "nothing selected" fallback would
+  // otherwise select.
+  function selectionListItem(editor) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    const node = sel.getRangeAt(0).commonAncestorContainer;
+    const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    return el && editor.contains(el) ? el.closest("li") : null;
+  }
+
   function refreshToolbarState() {
     const editor = formatEditor();
     if (!editor) return;
     fmtBoldBtn.classList.toggle("active", document.queryCommandState("bold"));
     fmtItalicBtn.classList.toggle("active", document.queryCommandState("italic"));
     fmtUnderlineBtn.classList.toggle("active", document.queryCommandState("underline"));
+    fmtStrikeBtn.classList.toggle("active", document.queryCommandState("strikeThrough"));
+    fmtBulletBtn.classList.toggle("active", document.queryCommandState("insertUnorderedList"));
+    fmtNumberBtn.classList.toggle("active", document.queryCommandState("insertOrderedList"));
+    const li = selectionListItem(editor);
+    fmtChecklistBtn.classList.toggle("active", !!(li && li.closest("ul.checklist")));
+    fmtIndentBtn.classList.toggle("disabled", !li);
+    fmtOutdentBtn.classList.toggle("disabled", !li);
     const block = document.queryCommandValue("formatBlock").toUpperCase();
     fmtHeadingSelect.value = block === "H2" || block === "H3" ? block : "P";
+    fmtAlignSelect.value = document.queryCommandState("justifyCenter")
+      ? "center"
+      : document.queryCommandState("justifyRight")
+      ? "right"
+      : document.queryCommandState("justifyFull")
+      ? "justify"
+      : "left";
   }
 
   // Replacing the <font> marker elements execCommand produces invalidates
@@ -1090,15 +1478,76 @@
     reselectSpans(spans);
   }
 
+  function applyTextColor(editor, hex) {
+    document.execCommand("foreColor", false, hex);
+    // Firefox emits <font color>; Chrome/Safari apply the style directly to a
+    // <span> already, so only the <font> case needs normalizing to match the
+    // sanitizer's allowlist (which only accepts `color` as a span style).
+    const spans = [];
+    editor.querySelectorAll("font[color]").forEach((f) => {
+      const span = document.createElement("span");
+      span.style.color = hex;
+      while (f.firstChild) span.appendChild(f.firstChild);
+      f.replaceWith(span);
+      spans.push(span);
+    });
+    reselectSpans(spans);
+  }
+
+  // A checklist is a plain <ul> (so it survives round-tripping through
+  // execCommand like any other list) marked with class="checklist", whose
+  // <li>s carry a data-checked attribute the sanitizer allowlists -- see the
+  // "Checklist item toggling" mousedown handler in createNoteElement for how
+  // that attribute gets flipped. There's no native execCommand for this, so
+  // it's built on top of insertUnorderedList: whichever <ul>(s) that command
+  // creates (comparing before/after) are the ones just marked as a checklist.
+  function applyChecklist(editor) {
+    const before = new Set(editor.querySelectorAll("ul"));
+    document.execCommand("insertUnorderedList");
+    editor.querySelectorAll("ul").forEach((ul) => {
+      if (before.has(ul)) return;
+      ul.classList.add("checklist");
+      ul.querySelectorAll("li").forEach((li) => {
+        if (!li.hasAttribute("data-checked")) li.setAttribute("data-checked", "false");
+      });
+    });
+  }
+
   fmtBoldBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtItalicBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtUnderlineBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtStrikeBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtBulletBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtNumberBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtChecklistBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtLinkBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtIndentBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtOutdentBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtImageBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtBoldBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("bold")));
   fmtItalicBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("italic")));
   fmtUnderlineBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("underline")));
+  fmtStrikeBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("strikeThrough")));
+  fmtBulletBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("insertUnorderedList")));
+  fmtNumberBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("insertOrderedList")));
+  fmtChecklistBtn.addEventListener("click", () => withEditorSelection((editor) => applyChecklist(editor)));
+  fmtIndentBtn.addEventListener("click", () => {
+    const editor = formatEditor();
+    if (!editor || !selectionListItem(editor)) return;
+    withEditorSelection(() => document.execCommand("indent"));
+  });
+  fmtOutdentBtn.addEventListener("click", () => {
+    const editor = formatEditor();
+    if (!editor || !selectionListItem(editor)) return;
+    withEditorSelection(() => document.execCommand("outdent"));
+  });
   fmtHeadingSelect.addEventListener("change", () => {
     const tag = fmtHeadingSelect.value === "P" ? "DIV" : fmtHeadingSelect.value;
     withEditorSelection(() => document.execCommand("formatBlock", false, `<${tag}>`));
+  });
+  fmtAlignSelect.addEventListener("change", () => {
+    const cmd = { left: "justifyLeft", center: "justifyCenter", right: "justifyRight", justify: "justifyFull" }[fmtAlignSelect.value];
+    withEditorSelection(() => document.execCommand(cmd));
   });
   fmtFontSelect.addEventListener("change", () => {
     withEditorSelection((editor) => applyFontFamily(editor, fmtFontSelect.value));
@@ -1106,20 +1555,166 @@
   fmtSizeSelect.addEventListener("change", () => {
     withEditorSelection((editor) => applyFontSize(editor, Number(fmtSizeSelect.value)));
   });
+  fmtColorInput.addEventListener("change", () => {
+    withEditorSelection((editor) => applyTextColor(editor, fmtColorInput.value));
+  });
 
-  function openFormatToolbar(id) {
-    if (!formatToolbar.hidden && formatTargetId === id) { closeFormatToolbar(); return; }
+  // ---------- Links ----------
+  // Only turns an existing selection into a link -- matches the toolbar's
+  // "select some text first" pattern used everywhere else, and sidesteps the
+  // extra UI a "no selection" insert-URL-as-text flow would need.
+  fmtLinkBtn.addEventListener("click", () => {
+    const editor = formatEditor();
+    if (!editor) return;
+    editor.focus();
+    ensureEditableSelection(formatTargetId, editor);
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.getRangeAt(0).collapsed) {
+      alert("Select some text first, then tap the link button to turn it into a hyperlink.");
+      return;
+    }
+    const url = prompt("Link URL:", "https://");
+    if (url === null) return;
+    const trimmed = url.trim();
+    if (!SAFE_HREF_RE.test(trimmed)) {
+      alert("Links must start with http://, https://, or mailto:.");
+      return;
+    }
+    withEditorSelection((ed) => {
+      document.execCommand("createLink", false, trimmed);
+      ed.querySelectorAll("a[href]").forEach((a) => {
+        if (a.getAttribute("href") !== trimmed) return;
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener noreferrer");
+      });
+    });
+  });
+
+  // ---------- Images ----------
+  // Images are embedded inline as data: URIs (never a remote src -- see the
+  // sanitizer) so they work the same for every peer with no server-side
+  // storage or upload endpoint of their own. Downscaled/recompressed
+  // client-side (same approach as the photo-scan feature) to keep a note's
+  // HTML, which is re-sent in full on every edit and capped by the
+  // WebSocket/Durable-Object message size, from ballooning.
+  const MAX_NOTE_IMAGE_DATA_URL_LEN = 700_000; // ~700KB of base64 text
+  let imageTargetId = null;
+  let imageInsertRange = null;
+
+  fmtImageBtn.addEventListener("click", () => {
+    const editor = formatEditor();
+    if (!editor) return;
+    imageTargetId = formatTargetId;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && editor.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      imageInsertRange = sel.getRangeAt(0).cloneRange();
+    } else {
+      const r = document.createRange();
+      r.selectNodeContents(editor);
+      r.collapse(false);
+      imageInsertRange = r;
+    }
+    noteImageInput.value = ""; // allow re-selecting the same file twice in a row
+    noteImageInput.click();
+  });
+
+  async function pickCompressedImageDataUrl(file) {
+    let dataUrl = await downscaleImageToDataUrl(file, 1000, 0.72);
+    if (dataUrl.length > MAX_NOTE_IMAGE_DATA_URL_LEN) {
+      dataUrl = await downscaleImageToDataUrl(file, 700, 0.55);
+    }
+    return dataUrl;
+  }
+
+  function insertImageIntoNote(id, dataUrl) {
+    const refs = noteEls.get(id);
+    if (!refs) return;
+    const editor = refs.editor;
+    const range = imageInsertRange && editor.contains(imageInsertRange.startContainer) ? imageInsertRange : null;
+    const target = range || (() => {
+      const r = document.createRange();
+      r.selectNodeContents(editor);
+      r.collapse(false);
+      return r;
+    })();
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    target.deleteContents();
+    target.insertNode(img);
+    target.setStartAfter(img);
+    target.collapse(true);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(target);
+    editor.focus();
+    if (editor.innerHTML === "<br>") editor.innerHTML = "";
+    scheduleAutofit(id);
+    sendHtmlUpdate(id);
+  }
+
+  noteImageInput.addEventListener("change", async () => {
+    const file = noteImageInput.files && noteImageInput.files[0];
+    const id = imageTargetId;
+    imageTargetId = null;
+    if (!file || !id) return;
+    fmtImageBtn.disabled = true;
+    try {
+      const dataUrl = await pickCompressedImageDataUrl(file);
+      if (dataUrl.length > MAX_NOTE_IMAGE_DATA_URL_LEN) {
+        alert("That image is too large even after compressing. Try a smaller photo.");
+        return;
+      }
+      insertImageIntoNote(id, dataUrl);
+    } catch (err) {
+      alert((err && err.message) || "Couldn't insert that image.");
+    } finally {
+      fmtImageBtn.disabled = false;
+      imageInsertRange = null;
+    }
+  });
+
+  // Hovering a note (desktop; see the pointerenter/pointerleave listeners in
+  // createNoteElement) or selecting one (touch tap, or a desktop click --
+  // see selectNote) shows its format toolbar; deliberately never focuses or
+  // touches the editor's own selection itself, since merely moving the
+  // mouse over a note must not yank the caret away from wherever the user
+  // is actually typing.
+  let hoverNoteId = null;
+  let hoverHideTimer = null;
+
+  function showFormatToolbarFor(id) {
+    if (!noteEls.has(id)) return;
+    if (formatTargetId === id && !formatToolbar.hidden) {
+      refreshToolbarState();
+      return;
+    }
     closeColorPopover();
     closeNoteFieldsPopover();
+    closeIdentityPopover();
     formatTargetId = id;
-    positionPopoverNear(formatToolbar, id);
-    const editor = formatEditor();
-    if (editor) {
-      editor.focus();
-      ensureEditableSelection(id, editor);
-    }
+    positionPopoverNear(formatToolbar, noteFullScreenRect(id));
     refreshToolbarState();
   }
+
+  // The toolbar sits visually next to (not inside) the note, so moving the
+  // mouse from one to the other briefly leaves both -- a short grace period,
+  // cancelled by re-entering either, keeps that hop from closing it.
+  function scheduleFormatToolbarHideCheck() {
+    clearTimeout(hoverHideTimer);
+    hoverHideTimer = setTimeout(() => {
+      if (formatTargetId && formatTargetId !== selectedId && formatTargetId !== hoverNoteId) {
+        closeFormatToolbar();
+      }
+    }, 300);
+  }
+
+  formatToolbar.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "mouse") clearTimeout(hoverHideTimer);
+  });
+  formatToolbar.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "mouse") scheduleFormatToolbarHideCheck();
+  });
+
   function closeFormatToolbar() {
     formatToolbar.hidden = true;
     formatTargetId = null;
@@ -1135,11 +1730,20 @@
   // state, synced like notes but stored under a separate server-side key so
   // "Clear Board" (which only wipes notes) leaves the schema intact.
   //
-  // There are no user accounts in this app (see README), so "assignee" isn't
-  // a real identity -- it's just a field, typically a select whose options
-  // are the names of whoever uses the board, or a free-text field. That's
-  // deliberate: the metadata system is generic, and assignee/status are one
-  // instance of it rather than special-cased.
+  // There are still no accounts in this app (see README), but a "Person(s)"
+  // field lets one of the other deliberately generic types -- select --
+  // specialize: instead of the board author typing out everyone's name as
+  // manual options, its choices are whoever's local identity (see "Local
+  // identity" above) has ever touched this board, kept in `roster`. A
+  // value is an array of entries -- see the "user field values" comment
+  // below -- resolved against `roster` at render time rather than a
+  // name/color baked in when set, so renaming yourself updates every note
+  // you're assigned to. Three field-level settings (stored on the field
+  // definition, not per note) shape it: `userMulti` allows more than one
+  // person; `userMatchMode` ("any" | "all") records, for a later filtering
+  // feature, whether a note should match when *any* or *all* of a
+  // multi-person field's people match; `userAllowFreeText` allows typing a
+  // plain name for someone not using this board at all.
   const FIELD_TYPES = [
     { id: "text", label: "Text" },
     { id: "number", label: "Number" },
@@ -1147,12 +1751,14 @@
     { id: "date", label: "Date" },
     { id: "select", label: "Single select" },
     { id: "multiselect", label: "Multi-select (tags)" },
+    { id: "user", label: "Person(s)" },
   ];
   const FIELD_TYPE_IDS = new Set(FIELD_TYPES.map((t) => t.id));
   const FIELD_TYPES_WITH_OPTIONS = new Set(["select", "multiselect"]);
   const OPTION_COLORS = ["#90caf9", "#a5d6a7", "#ffe082", "#ffab91", "#ce93d8", "#f48fb1", "#80cbc4", "#bcaaa4"];
   const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
   const MAX_FIELD_TEXT_LEN = 200;
+  const MAX_USER_FIELD_ENTRIES = 20;
 
   // Ready-made fields covering the common cases (todo-style status, an
   // assignee, priority, tags, a due date) so the feature is useful the
@@ -1168,7 +1774,7 @@
         { label: "Done", color: "#a5d6a7" },
       ],
     },
-    { name: "Assignee", type: "text", options: [] },
+    { name: "Assignee", type: "user", options: [], userMulti: false, userAllowFreeText: true },
     {
       name: "Priority",
       type: "select",
@@ -1213,8 +1819,37 @@
           color: sanitizeFieldColor(o && o.color),
         }));
       }
+      if (type === "user") {
+        def.userMulti = !!(f && f.userMulti);
+        def.userMatchMode = f && f.userMatchMode === "all" ? "all" : "any";
+        def.userAllowFreeText = !!(f && f.userAllowFreeText);
+      }
       return def;
     });
+  }
+
+  // A "user" field's per-note value is an array of entries, each either a
+  // roster reference ({ u: userId }, resolved against `roster` at render
+  // time) or a freely-typed name ({ n: "some name" }) for someone not
+  // using this board -- kept as a tagged shape rather than plain strings
+  // so a typed name can never collide with a roster id. Also accepts the
+  // old pre-multi shape (a bare user id string) so notes saved before this
+  // existed still render.
+  function normalizeUserFieldValue(value) {
+    if (Array.isArray(value)) {
+      return value
+        .map((e) => {
+          if (e && typeof e === "object") {
+            if (typeof e.u === "string" && e.u) return { u: e.u };
+            if (typeof e.n === "string" && e.n.trim()) return { n: e.n.trim().slice(0, 40) };
+          }
+          return null;
+        })
+        .filter(Boolean)
+        .slice(0, MAX_USER_FIELD_ENTRIES);
+    }
+    if (typeof value === "string" && value) return [{ u: value }];
+    return [];
   }
 
   function findOptionDef(field, id) {
@@ -1250,6 +1885,25 @@
     return chip;
   }
 
+  // `entry` is one normalized user-field value: { u: userId } (resolved
+  // against the roster) or { n: name } (a freely-typed name with no
+  // identity behind it -- shown with a dashed avatar to mark it as such).
+  function makeUserChip(entry) {
+    const isFreeText = !!(entry && entry.n);
+    const name = isFreeText ? entry.n : (roster.get(entry && entry.u) || {}).name || "Unknown";
+    const initials = isFreeText ? initialsFrom(entry.n) : (roster.get(entry.u) || {}).initials || "?";
+    const color = isFreeText ? "#888" : (roster.get(entry.u) || {}).color || "#888";
+    const chip = document.createElement("span");
+    chip.className = "field-chip user-chip" + (isFreeText ? " user-chip-freetext" : "");
+    const dot = document.createElement("span");
+    dot.className = "user-chip-avatar";
+    dot.style.background = color;
+    dot.textContent = initials;
+    chip.appendChild(dot);
+    chip.appendChild(document.createTextNode(name));
+    return chip;
+  }
+
   function renderNoteFieldRow(id) {
     const note = notes.get(id);
     const refs = noteEls.get(id);
@@ -1278,6 +1932,11 @@
           any = true;
           row.appendChild(makeFieldChip(opt.label, opt.color));
         }
+      } else if (field.type === "user") {
+        for (const entry of normalizeUserFieldValue(value)) {
+          any = true;
+          row.appendChild(makeUserChip(entry));
+        }
       } else {
         // text, number, date
         if (value === undefined || value === null || value === "") continue;
@@ -1302,9 +1961,10 @@
     if (!noteFieldsPopover.hidden && fieldsPopoverNoteId === id) { closeNoteFieldsPopover(); return; }
     closeColorPopover();
     closeFormatToolbar();
+    closeIdentityPopover();
     fieldsPopoverNoteId = id;
     renderNoteFieldsPopoverContent(id);
-    positionPopoverNear(noteFieldsPopover, id);
+    positionPopoverNear(noteFieldsPopover, noteHeaderScreenRect(id));
   }
 
   function closeNoteFieldsPopover() {
@@ -1323,6 +1983,142 @@
     renderNoteFieldRow(id);
     MP.sendUpdate(id, { fields: note.fields });
     if (!isEmpty) syncZonePositionToField(note, fieldId, value);
+  }
+
+  // A small text input + "Add" button for typing a free-form name into a
+  // "user" field that allows it. Enter or the button both commit; `onAdd`
+  // receives the trimmed, non-empty name.
+  function makeFreeTextAddRow(onAdd) {
+    const freeRow = document.createElement("div");
+    freeRow.className = "user-field-freetext-row";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Type a name…";
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn small";
+    addBtn.textContent = "Add";
+    const submit = () => {
+      const name = input.value.trim().slice(0, 40);
+      if (!name) return;
+      input.value = "";
+      onAdd(name);
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); submit(); }
+    });
+    addBtn.addEventListener("click", submit);
+    freeRow.appendChild(input);
+    freeRow.appendChild(addBtn);
+    return freeRow;
+  }
+
+  // Builds the editor for a "user" field inside the per-note fields
+  // popover. Single-person fields keep the old plain-<select> feel (plus a
+  // freetext input alongside it, if the field allows one); multi-person
+  // fields show removable chips for whoever's already assigned plus
+  // always-visible "add" controls, mirroring the multiselect option-toggle
+  // pattern elsewhere in this file but with a growing roster (+ freetext)
+  // instead of a fixed option list.
+  function renderUserFieldEditor(id, field, entries) {
+    const wrap = document.createElement("div");
+    wrap.className = "user-field-editor";
+    const commitAndRerender = (next) => {
+      setNoteFieldValue(id, field.id, next);
+      renderNoteFieldsPopoverContent(id);
+      positionPopoverNear(noteFieldsPopover, noteHeaderScreenRect(id));
+    };
+
+    if (field.userMulti) {
+      if (entries.length) {
+        const chipsRow = document.createElement("div");
+        chipsRow.className = "user-field-selected";
+        entries.forEach((entry, idx) => {
+          const chip = makeUserChip(entry);
+          const rm = document.createElement("button");
+          rm.type = "button";
+          rm.className = "chip-remove";
+          rm.title = "Remove";
+          rm.textContent = "×";
+          rm.addEventListener("click", () => commitAndRerender(entries.filter((_, i) => i !== idx)));
+          chip.appendChild(rm);
+          chipsRow.appendChild(chip);
+        });
+        wrap.appendChild(chipsRow);
+      }
+
+      const addedUserIds = new Set(entries.filter((e) => e.u).map((e) => e.u));
+      const candidates = [...roster.entries()]
+        .filter(([userId]) => !addedUserIds.has(userId))
+        .sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
+      const select = document.createElement("select");
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "+ Add person…";
+      select.appendChild(blank);
+      for (const [userId, u] of candidates) {
+        const o = document.createElement("option");
+        o.value = userId;
+        o.textContent = (u.name || "Anonymous") + (userId === myUserId ? " (you)" : "");
+        select.appendChild(o);
+      }
+      select.addEventListener("change", () => {
+        if (!select.value) return;
+        commitAndRerender([...entries, { u: select.value }]);
+      });
+      wrap.appendChild(select);
+
+      if (field.userAllowFreeText) {
+        wrap.appendChild(makeFreeTextAddRow((name) => commitAndRerender([...entries, { n: name }])));
+      }
+    } else {
+      const current = entries[0] || null;
+      const select = document.createElement("select");
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "— Unassigned —";
+      if (!current) blank.selected = true;
+      select.appendChild(blank);
+      let currentInRoster = false;
+      const rosterEntries = [...roster.entries()].sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
+      for (const [userId, u] of rosterEntries) {
+        const isCurrent = !!current && current.u === userId;
+        if (isCurrent) currentInRoster = true;
+        const o = document.createElement("option");
+        o.value = userId;
+        o.textContent = (u.name || "Anonymous") + (userId === myUserId ? " (you)" : "");
+        if (isCurrent) o.selected = true;
+        select.appendChild(o);
+      }
+      // A value can outlive its roster entry only if this board's roster
+      // was somehow cleared server-side -- keep it selectable rather than
+      // silently discarding whoever it pointed to.
+      if (current && current.u && !currentInRoster) {
+        const o = document.createElement("option");
+        o.value = current.u;
+        o.textContent = "Unknown user";
+        o.selected = true;
+        select.appendChild(o);
+      }
+      select.addEventListener("change", () => {
+        commitAndRerender(select.value ? [{ u: select.value }] : []);
+      });
+      wrap.appendChild(select);
+
+      if (field.userAllowFreeText) {
+        const freeInput = document.createElement("input");
+        freeInput.type = "text";
+        freeInput.placeholder = "…or type a name";
+        freeInput.value = current && current.n ? current.n : "";
+        freeInput.addEventListener("change", () => {
+          const name = freeInput.value.trim().slice(0, 40);
+          commitAndRerender(name ? [{ n: name }] : []);
+        });
+        wrap.appendChild(freeInput);
+      }
+    }
+
+    return wrap;
   }
 
   function renderNoteFieldsPopoverContent(id) {
@@ -1398,11 +2194,13 @@
             else selected.add(opt.id);
             setNoteFieldValue(id, field.id, [...selected]);
             renderNoteFieldsPopoverContent(id);
-            positionPopoverNear(noteFieldsPopover, id);
+            positionPopoverNear(noteFieldsPopover, noteHeaderScreenRect(id));
           });
           wrap.appendChild(optBtn);
         }
         row.appendChild(wrap);
+      } else if (field.type === "user") {
+        row.appendChild(renderUserFieldEditor(id, field, normalizeUserFieldValue(values[field.id])));
       }
       noteFieldsPopover.appendChild(row);
     }
@@ -1452,6 +2250,11 @@
       if (FIELD_TYPES_WITH_OPTIONS.has(field.type) && !field.options.length) {
         field.options = [{ id: makeId(), label: "Option 1", color: OPTION_COLORS[0] }];
       }
+      if (field.type === "user") {
+        if (field.userMulti === undefined) field.userMulti = false;
+        if (!field.userMatchMode) field.userMatchMode = "any";
+        if (field.userAllowFreeText === undefined) field.userAllowFreeText = false;
+      }
       commitFieldDefs();
     });
 
@@ -1472,8 +2275,68 @@
     row.appendChild(top);
 
     if (FIELD_TYPES_WITH_OPTIONS.has(field.type)) row.appendChild(renderFieldOptionsEditor(field));
+    if (field.type === "user") row.appendChild(renderUserFieldSettings(field));
 
     return row;
+  }
+
+  // Field-level (not per-note) settings for a "user" field: whether more
+  // than one person can be assigned, how a later filtering feature should
+  // treat a multi-person value ("any" vs "all" of them matching), and
+  // whether a plain typed name is allowed alongside real board users.
+  function renderUserFieldSettings(field) {
+    const wrap = document.createElement("div");
+    wrap.className = "field-options-editor user-field-settings";
+
+    const multiRow = document.createElement("label");
+    multiRow.className = "field-checkbox-row";
+    const multiCb = document.createElement("input");
+    multiCb.type = "checkbox";
+    multiCb.checked = !!field.userMulti;
+    multiCb.addEventListener("change", () => {
+      field.userMulti = multiCb.checked;
+      commitFieldDefs();
+    });
+    multiRow.appendChild(multiCb);
+    multiRow.appendChild(document.createTextNode(" Allow more than one person"));
+    wrap.appendChild(multiRow);
+
+    if (field.userMulti) {
+      const modeRow = document.createElement("label");
+      modeRow.className = "field-checkbox-row";
+      modeRow.appendChild(document.createTextNode("Note matches when "));
+      const modeSelect = document.createElement("select");
+      modeSelect.className = "field-type-select";
+      for (const [val, label] of [["any", "any of them"], ["all", "all of them"]]) {
+        const o = document.createElement("option");
+        o.value = val;
+        o.textContent = label;
+        if ((field.userMatchMode || "any") === val) o.selected = true;
+        modeSelect.appendChild(o);
+      }
+      modeSelect.addEventListener("change", () => {
+        field.userMatchMode = modeSelect.value;
+        commitFieldDefs();
+      });
+      modeRow.appendChild(modeSelect);
+      modeRow.appendChild(document.createTextNode(" match (used by filtering, later)"));
+      wrap.appendChild(modeRow);
+    }
+
+    const freeRow = document.createElement("label");
+    freeRow.className = "field-checkbox-row";
+    const freeCb = document.createElement("input");
+    freeCb.type = "checkbox";
+    freeCb.checked = !!field.userAllowFreeText;
+    freeCb.addEventListener("change", () => {
+      field.userAllowFreeText = freeCb.checked;
+      commitFieldDefs();
+    });
+    freeRow.appendChild(freeCb);
+    freeRow.appendChild(document.createTextNode(" Allow typing a name (for people not using this board)"));
+    wrap.appendChild(freeRow);
+
+    return wrap;
   }
 
   function renderFieldOptionsEditor(field) {
@@ -1553,6 +2416,13 @@
           name: preset.name,
           type: preset.type,
           options: preset.options.map((o) => ({ id: makeId(), label: o.label, color: o.color })),
+          ...(preset.type === "user"
+            ? {
+                userMulti: !!preset.userMulti,
+                userMatchMode: preset.userMatchMode === "all" ? "all" : "any",
+                userAllowFreeText: !!preset.userAllowFreeText,
+              }
+            : {}),
         });
         commitFieldDefs();
       });
@@ -2045,7 +2915,6 @@
 
   // ---------- Multiplayer (Cloudflare Worker + Durable Objects) ----------
   const myPointer = { x: -1, y: -1, active: false };
-  const myColor = CURSOR_COLORS[Math.floor(Math.random() * CURSOR_COLORS.length)];
 
   const MP = (() => {
     let ws = null;
@@ -2123,11 +2992,14 @@
       ws.onopen = () => {
         reconnectDelay = 1000;
         setConnDot("connected");
+        sendIdentity();
       };
       ws.onclose = () => {
         setConnDot("disconnected");
         setTimeout(connect, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 1.6, 15000);
+        onlineConnToUser.clear();
+        renderPresenceRow();
       };
       ws.onerror = () => {
         try { ws.close(); } catch (err) { /* already closing */ }
@@ -2143,11 +3015,29 @@
       switch (msg.t) {
         case "history":
           applyRemoteFieldDefs(msg.fields);
-          for (const note of msg.notes) {
-            try {
-              addNoteLocally(note);
-            } catch (err) {
-              console.error("Failed to add note from history", note, err);
+          applyRemoteBackground(msg.background);
+          for (const u of msg.users || []) applyRosterEntry(u);
+          onlineConnToUser.clear();
+          for (const u of msg.online || []) {
+            applyRosterEntry(u);
+            if (u && u.connId) onlineConnToUser.set(u.connId, u.id);
+          }
+          renderPresenceRow();
+          {
+            const seenIds = new Set();
+            for (const note of msg.notes) {
+              seenIds.add(note.id);
+              try {
+                addNoteLocally(note);
+              } catch (err) {
+                console.error("Failed to add note from history", note, err);
+              }
+            }
+            // History is the server's authoritative snapshot -- drop any
+            // note we're still tracking locally that it no longer has (e.g.
+            // deleted by a peer while this connection was reconnecting).
+            for (const id of [...notes.keys()]) {
+              if (!seenIds.has(id)) deleteNote(id);
             }
           }
           for (const zone of msg.zones || []) {
@@ -2180,11 +3070,24 @@
         case "fields":
           applyRemoteFieldDefs(msg.fields);
           break;
+        case "identity":
+          applyRosterEntry(msg);
+          onlineConnToUser.set(msg.from, msg.id);
+          renderPresenceRow();
+          renderAllNoteFieldRows();
+          if (fieldsPopoverNoteId) renderNoteFieldsPopoverContent(fieldsPopoverNoteId);
+          refreshRemoteCursorLabel(msg.from);
+          break;
+        case "background":
+          applyRemoteBackground(msg.background);
+          break;
         case "cursor":
           updateRemoteCursor(msg);
           break;
         case "leave":
           removeRemoteCursor(msg.from);
+          onlineConnToUser.delete(msg.from);
+          renderPresenceRow();
           break;
         default:
           break;
@@ -2196,6 +3099,7 @@
       if (!el) {
         el = document.createElement("div");
         el.className = "remote-cursor";
+        el.appendChild(document.createElement("span")).className = "remote-cursor-label";
         cursorsEl.appendChild(el);
         remoteCursorEls.set(msg.from, el);
       }
@@ -2204,6 +3108,21 @@
       el.style.borderColor = msg.color || "#fff";
       el.style.background = msg.color || "#fff";
       remoteLastSeen.set(msg.from, performance.now());
+      refreshRemoteCursorLabel(msg.from);
+    }
+
+    // A cursor's label needs whichever identity is currently mapped to its
+    // connection id, which can arrive after the cursor itself (join order
+    // isn't guaranteed) -- so this is called both when a cursor moves and
+    // when an "identity" message resolves a connection to a user.
+    function refreshRemoteCursorLabel(connId) {
+      const el = remoteCursorEls.get(connId);
+      if (!el) return;
+      const label = el.querySelector(".remote-cursor-label");
+      if (!label) return;
+      const userId = onlineConnToUser.get(connId);
+      const u = userId && roster.get(userId);
+      label.textContent = u && u.name ? u.name : "";
     }
 
     function removeRemoteCursor(from) {
@@ -2226,10 +3145,14 @@
 
     function tick(now) {
       if (myPointer.active && now - lastCursorSent > 66) {
-        send({ t: "cursor", x: Math.round(myPointer.x), y: Math.round(myPointer.y), color: myColor });
+        send({ t: "cursor", x: Math.round(myPointer.x), y: Math.round(myPointer.y), color: myIdentity.color });
         lastCursorSent = now;
       }
       sweepStaleCursors();
+    }
+
+    function sendIdentity() {
+      send({ t: "identity", id: myUserId, name: myIdentity.name, initials: myIdentity.initials, color: myIdentity.color });
     }
 
     function init() {
@@ -2252,6 +3175,8 @@
       sendZoneUpdate: (id, fields) => send({ t: "update", kind: "zone", id, ...fields }),
       sendZoneDelete: (id) => send({ t: "delete", kind: "zone", id }),
       sendFields: (fields) => send({ t: "fields", fields }),
+      sendIdentity,
+      sendBackground: (background) => send({ t: "background", background }),
     };
   })();
 
