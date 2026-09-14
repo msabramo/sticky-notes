@@ -7,6 +7,8 @@
   const addNoteBtn = document.getElementById("addNoteBtn");
   const scanBtn = document.getElementById("scanBtn");
   const photoInput = document.getElementById("photoInput");
+  const addImageNoteBtn = document.getElementById("addImageNoteBtn");
+  const imageNoteInput = document.getElementById("imageNoteInput");
   const zoomInBtn = document.getElementById("zoomInBtn");
   const zoomOutBtn = document.getElementById("zoomOutBtn");
   const fitBtn = document.getElementById("fitBtn");
@@ -118,6 +120,14 @@
   // <img src="https://..."> would silently phone home to a third party (and
   // leak the viewer's IP) the instant anyone merely opens the board.
   const SAFE_IMG_SRC_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
+
+  // Same rule as an inline <img> above, applied to a whole image note's
+  // `img` field -- that field is just as opaque-and-unvalidated coming from
+  // a peer or board history as any other note property, so it must be
+  // checked before it's ever assigned to a real <img>'s src.
+  function sanitizeImgSrc(src) {
+    return typeof src === "string" && SAFE_IMG_SRC_RE.test(src) ? src : "";
+  }
 
   function sanitizeStyle(styleText) {
     const out = [];
@@ -444,7 +454,7 @@
 
   function autofitNoteText(id) {
     const refs = noteEls.get(id);
-    if (!refs || !refs.editor.isConnected) return;
+    if (!refs || !refs.editor || !refs.editor.isConnected) return;
     const el = refs.editor;
     let lo = AUTOFIT_MIN_PX, hi = AUTOFIT_MAX_PX, best = AUTOFIT_MIN_PX;
     while (lo <= hi) {
@@ -649,18 +659,29 @@
   }
 
   function createNoteElement(note) {
+    const isImage = note.kind === "image";
     const el = document.createElement("div");
     el.className = "note";
     el.dataset.id = note.id;
+    el.dataset.kind = note.kind || "text";
     el.style.width = note.w + "px";
     el.style.height = note.h + "px";
     el.style.background = note.color;
+    el.classList.toggle("note-bare", isImage || note.color === "transparent");
 
     const header = document.createElement("div");
     header.className = "note-header";
     const colorBtn = document.createElement("button");
     colorBtn.textContent = "●";
     colorBtn.title = "Color";
+    header.appendChild(colorBtn);
+    let replaceImageBtn = null;
+    if (isImage) {
+      replaceImageBtn = document.createElement("button");
+      replaceImageBtn.textContent = "🖼";
+      replaceImageBtn.title = "Replace image";
+      header.appendChild(replaceImageBtn);
+    }
     const fieldsBtn = document.createElement("button");
     fieldsBtn.textContent = "🏷";
     fieldsBtn.title = "Fields";
@@ -668,7 +689,6 @@
     const delBtn = document.createElement("button");
     delBtn.textContent = "×";
     delBtn.title = "Delete";
-    header.appendChild(colorBtn);
     header.appendChild(fieldsBtn);
     header.appendChild(delBtn);
 
@@ -676,14 +696,29 @@
     fieldsRow.className = "note-fields-row";
     fieldsRow.hidden = true;
 
-    const editor = document.createElement("div");
-    editor.className = "note-text";
-    editor.contentEditable = "true";
-    editor.dataset.placeholder = "Type…";
-    editor.spellcheck = false;
-    editor.innerHTML = initialNoteHtml(note);
-    const slant = noteTextSlantDeg(note.id);
-    if (slant) editor.style.fontStyle = `oblique ${slant}deg`;
+    // An image note swaps the contenteditable text body for a plain <img>
+    // that fills the note's whole box (see .note-image/.note-bare in
+    // style.css) -- everything else about it (drag/resize/rotate/z-order/
+    // delete/fields, and realtime sync of its position) is the same generic
+    // note machinery a text note uses.
+    let editor = null;
+    let img = null;
+    if (isImage) {
+      img = document.createElement("img");
+      img.className = "note-image";
+      img.alt = "";
+      img.draggable = false;
+      img.src = sanitizeImgSrc(note.img);
+    } else {
+      editor = document.createElement("div");
+      editor.className = "note-text";
+      editor.contentEditable = "true";
+      editor.dataset.placeholder = "Type…";
+      editor.spellcheck = false;
+      editor.innerHTML = initialNoteHtml(note);
+      const slant = noteTextSlantDeg(note.id);
+      if (slant) editor.style.fontStyle = `oblique ${slant}deg`;
+    }
 
     const resizeHandle = document.createElement("div");
     resizeHandle.className = "note-resize";
@@ -691,7 +726,7 @@
 
     el.appendChild(header);
     el.appendChild(fieldsRow);
-    el.appendChild(editor);
+    el.appendChild(isImage ? img : editor);
     el.appendChild(resizeHandle);
     world.insertBefore(el, cursorsEl);
 
@@ -709,45 +744,55 @@
       MP.sendDelete(note.id);
     });
 
-    let debounceTimer = null;
-    editor.addEventListener("focus", () => selectNote(note.id));
-    editor.addEventListener("input", () => {
-      // Chrome leaves a stray <br> behind when the last character is deleted;
-      // normalize that back to empty so the CSS placeholder shows again.
-      if (editor.innerHTML === "<br>") editor.innerHTML = "";
-      scheduleAutofit(note.id);
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => sendHtmlUpdate(note.id), 400);
-    });
-    editor.addEventListener("blur", () => {
-      if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
-      sendHtmlUpdate(note.id);
-    });
-    editor.addEventListener("paste", (e) => {
-      e.preventDefault();
-      const text = (e.clipboardData || window.clipboardData).getData("text/plain");
-      document.execCommand("insertText", false, text);
-    });
-    // Checklist items store their checked state as a data attribute (see
-    // applyChecklist) rather than a real <input type="checkbox">, so there's
-    // nothing for contenteditable to fight over -- clicking the rendered
-    // checkbox (a ::before box drawn inside the <li>'s own CHECKLIST_BOX_EM
-    // of left padding, matching the CSS, so offsetX there is never negative)
-    // just flips the attribute instead of placing a caret there. The hit
-    // width is computed from the li's current (autofit-scaled) font-size
-    // rather than a fixed pixel constant, since note text can render
-    // anywhere from 13px to 64px.
-    editor.addEventListener("mousedown", (e) => {
-      const li = e.target.closest("li");
-      if (!li || !li.closest("ul.checklist") || !editor.contains(li)) return;
-      const hitWidth = parseFloat(getComputedStyle(li).fontSize) * CHECKLIST_BOX_EM;
-      if (e.offsetX >= 0 && e.offsetX < hitWidth) {
-        e.preventDefault();
-        const checked = li.getAttribute("data-checked") === "true";
-        li.setAttribute("data-checked", checked ? "false" : "true");
+    if (isImage) {
+      replaceImageBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        replaceNoteImage(note.id);
+      });
+      // There's no focusable/editable child to select the note the way a
+      // text note's editor does on focus, so the image itself does it.
+      img.addEventListener("pointerdown", () => selectNote(note.id));
+    } else {
+      let debounceTimer = null;
+      editor.addEventListener("focus", () => selectNote(note.id));
+      editor.addEventListener("input", () => {
+        // Chrome leaves a stray <br> behind when the last character is deleted;
+        // normalize that back to empty so the CSS placeholder shows again.
+        if (editor.innerHTML === "<br>") editor.innerHTML = "";
+        scheduleAutofit(note.id);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => sendHtmlUpdate(note.id), 400);
+      });
+      editor.addEventListener("blur", () => {
+        if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
         sendHtmlUpdate(note.id);
-      }
-    });
+      });
+      editor.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData("text/plain");
+        document.execCommand("insertText", false, text);
+      });
+      // Checklist items store their checked state as a data attribute (see
+      // applyChecklist) rather than a real <input type="checkbox">, so there's
+      // nothing for contenteditable to fight over -- clicking the rendered
+      // checkbox (a ::before box drawn inside the <li>'s own CHECKLIST_BOX_EM
+      // of left padding, matching the CSS, so offsetX there is never negative)
+      // just flips the attribute instead of placing a caret there. The hit
+      // width is computed from the li's current (autofit-scaled) font-size
+      // rather than a fixed pixel constant, since note text can render
+      // anywhere from 13px to 64px.
+      editor.addEventListener("mousedown", (e) => {
+        const li = e.target.closest("li");
+        if (!li || !li.closest("ul.checklist") || !editor.contains(li)) return;
+        const hitWidth = parseFloat(getComputedStyle(li).fontSize) * CHECKLIST_BOX_EM;
+        if (e.offsetX >= 0 && e.offsetX < hitWidth) {
+          e.preventDefault();
+          const checked = li.getAttribute("data-checked") === "true";
+          li.setAttribute("data-checked", checked ? "false" : "true");
+          sendHtmlUpdate(note.id);
+        }
+      });
+    }
     el.addEventListener("pointerenter", (e) => {
       if (e.pointerType !== "mouse") return;
       hoverNoteId = note.id;
@@ -759,8 +804,8 @@
       scheduleFormatToolbarHideCheck();
     });
 
-    noteEls.set(note.id, { el, header, editor, colorBtn, fieldsRow });
-    autofitNoteText(note.id);
+    noteEls.set(note.id, { el, header, editor, colorBtn, fieldsRow, img });
+    if (!isImage) autofitNoteText(note.id);
     return el;
   }
 
@@ -842,7 +887,10 @@
     if (!note) return;
     note.color = color;
     const refs = noteEls.get(id);
-    if (refs) refs.el.style.background = color;
+    if (refs) {
+      refs.el.style.background = color;
+      refs.el.classList.toggle("note-bare", note.kind === "image" || color === "transparent");
+    }
     MP.sendUpdate(id, { color });
   }
 
@@ -878,10 +926,15 @@
     }
     const refs = noteEls.get(data.id);
     if (refs) {
-      if (remoteHtml !== null && document.activeElement !== refs.editor) {
+      if (remoteHtml !== null && refs.editor && document.activeElement !== refs.editor) {
         refs.editor.innerHTML = remoteHtml;
       }
+      if (typeof data.img === "string" && refs.img) {
+        const src = sanitizeImgSrc(data.img);
+        if (src) refs.img.src = src;
+      }
       if (data.color) refs.el.style.background = data.color;
+      refs.el.classList.toggle("note-bare", note.kind === "image" || note.color === "transparent");
       if (typeof data.w === "number") refs.el.style.width = data.w + "px";
       if (typeof data.h === "number") refs.el.style.height = data.h + "px";
       scheduleAutofit(data.id);
@@ -1310,6 +1363,9 @@
 
   function showFormatToolbarFor(id) {
     if (!noteEls.has(id)) return;
+    // Image notes have no rich-text editor for this toolbar to act on.
+    const note = notes.get(id);
+    if (note && note.kind === "image") return;
     if (formatTargetId === id && !formatToolbar.hidden) {
       refreshToolbarState();
       return;
@@ -2106,6 +2162,95 @@
       vr.x + vr.w / 2 + (Math.random() * jitter * 2 - jitter),
       vr.y + vr.h / 2 + (Math.random() * jitter * 2 - jitter)
     );
+  });
+
+  // ---------- Image notes (a photo sitting directly on the board) ----------
+  // Sized to the image's own aspect ratio (capped by MIN/MAX_NOTE_W/H) rather
+  // than the fixed square a text note starts as, so a tall portrait or wide
+  // landscape photo lands looking like a photo, not a cropped square.
+  function addImageNote(worldX, worldY, dataUrl) {
+    return new Promise((resolve) => {
+      const probe = new Image();
+      probe.onload = () => {
+        const maxDim = 220;
+        const scale = Math.min(1, maxDim / Math.max(probe.naturalWidth, probe.naturalHeight));
+        const w = clamp(Math.round((probe.naturalWidth || NOTE_W) * scale), MIN_NOTE_W, MAX_NOTE_W);
+        const h = clamp(Math.round((probe.naturalHeight || NOTE_H) * scale), MIN_NOTE_H, MAX_NOTE_H);
+        const id = makeId();
+        zCounter += 1;
+        const note = {
+          id,
+          x: worldX - w / 2,
+          y: worldY - h / 2,
+          w,
+          h,
+          color: "transparent",
+          kind: "image",
+          img: dataUrl,
+          rot: Math.round((Math.random() * 6 - 3) * 10) / 10,
+          z: zCounter,
+          fields: {},
+        };
+        addNoteLocally(note);
+        MP.sendCreate(note);
+        resolve(id);
+      };
+      probe.onerror = () => resolve(null);
+      probe.src = dataUrl;
+    });
+  }
+
+  function setNoteImage(id, dataUrl) {
+    const note = notes.get(id);
+    const refs = noteEls.get(id);
+    if (!note || !refs || !refs.img) return;
+    note.img = dataUrl;
+    refs.img.src = dataUrl;
+    MP.sendUpdate(id, { img: dataUrl });
+  }
+
+  let replaceImageTargetId = null;
+
+  function replaceNoteImage(id) {
+    replaceImageTargetId = id;
+    imageNoteInput.value = ""; // allow re-selecting the same file twice in a row
+    imageNoteInput.click();
+  }
+
+  addImageNoteBtn.addEventListener("click", () => {
+    replaceImageTargetId = null;
+    imageNoteInput.value = "";
+    imageNoteInput.click();
+  });
+
+  imageNoteInput.addEventListener("change", async () => {
+    const file = imageNoteInput.files && imageNoteInput.files[0];
+    const targetId = replaceImageTargetId;
+    replaceImageTargetId = null;
+    if (!file) return;
+    addImageNoteBtn.disabled = true;
+    try {
+      const dataUrl = await pickCompressedImageDataUrl(file);
+      if (dataUrl.length > MAX_NOTE_IMAGE_DATA_URL_LEN) {
+        alert("That image is too large even after compressing. Try a smaller photo.");
+        return;
+      }
+      if (targetId) {
+        setNoteImage(targetId, dataUrl);
+      } else {
+        const vr = visibleWorldRect();
+        const jitter = 24;
+        await addImageNote(
+          vr.x + vr.w / 2 + (Math.random() * jitter * 2 - jitter),
+          vr.y + vr.h / 2 + (Math.random() * jitter * 2 - jitter),
+          dataUrl
+        );
+      }
+    } catch (err) {
+      alert((err && err.message) || "Couldn't add that image.");
+    } finally {
+      addImageNoteBtn.disabled = false;
+    }
   });
 
   // ---------- Photo-to-notes (Claude vision) ----------

@@ -427,6 +427,52 @@ body {
   margin: 4px 0;
 }
 
+.note-image {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  cursor: pointer;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* A "bare" note -- transparent-color text, or any image note -- is meant to
+   read as text/a photo sitting directly on the board rather than a pinned
+   sticky note: no paper shadow, and its header/resize handle (still needed
+   to drag/delete/resize/replace it) only appear on hover or while selected,
+   floated over the content instead of reserving their own row, so an image
+   note's photo can fill the whole box edge to edge. */
+.note.note-bare {
+  box-shadow: none;
+}
+.note.note-bare .note-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.note.note-bare:hover .note-header,
+.note.note-bare.selected .note-header,
+.note.note-bare .note-header:focus-within {
+  opacity: 1;
+}
+.note.note-bare .note-text {
+  padding-top: 10px;
+}
+.note.note-bare .note-resize {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.note.note-bare:hover .note-resize,
+.note.note-bare.selected .note-resize {
+  opacity: 1;
+}
+
 .note.selected {
   outline: 2px solid rgba(255, 255, 255, 0.6);
   outline-offset: 2px;
@@ -476,6 +522,10 @@ body {
   border: 1px solid var(--border);
 }
 
+.fab-tertiary {
+  bottom: 136px;
+}
+
 /* ---------- Color popover ---------- */
 .color-popover {
   position: absolute;
@@ -503,6 +553,14 @@ body {
   padding: 0;
 }
 .color-opt:hover { transform: scale(1.1); }
+
+.color-opt-transparent {
+  background-image:
+    linear-gradient(45deg, #999 25%, transparent 25%, transparent 75%, #999 75%, #999),
+    linear-gradient(45deg, #999 25%, #eee 25%, #eee 75%, #999 75%, #999);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+}
 
 /* ---------- Format toolbar ----------
    A single flex-wrap row (wraps onto a second/third line on narrow
