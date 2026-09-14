@@ -255,6 +255,70 @@ body {
 .note-text h1 { font-size: 1.5em; }
 .note-text h2 { font-size: 1.25em; }
 .note-text h3 { font-size: 1.05em; }
+.note-text ul, .note-text ol {
+  margin: 2px 0;
+  padding-left: 1.3em;
+}
+.note-text li { margin: 1px 0; }
+.note-text s, .note-text strike { text-decoration: line-through; }
+.note-text a {
+  color: #1a54b8;
+  text-decoration: underline;
+}
+
+/* A checklist item's checkbox is drawn (not a real <input>, which
+   contenteditable would fight over) as a ::before box. It's positioned
+   inside the <li>'s own padding-left (not the <ul>'s, and not a negative
+   offset outside the li) specifically so a click there lands on the li at
+   a *non-negative* offsetX -- the mousedown handler in createNoteElement
+   (script.js) hit-tests against that same padding width to decide whether
+   a click toggles data-checked instead of placing a text caret. */
+.note-text ul.checklist {
+  list-style: none;
+  padding-left: 0;
+}
+.note-text ul.checklist li {
+  position: relative;
+  padding-left: 1.7em;
+}
+.note-text ul.checklist li::before {
+  content: "";
+  position: absolute;
+  left: 0.15em;
+  top: 0.2em;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.note-text ul.checklist li[data-checked="true"]::before {
+  background: currentColor;
+}
+.note-text ul.checklist li[data-checked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0.38em;
+  top: 0.38em;
+  width: 0.4em;
+  height: 0.2em;
+  border-left: 2px solid rgba(255, 255, 255, 0.92);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.92);
+  transform: rotate(-45deg);
+  pointer-events: none;
+}
+.note-text ul.checklist li[data-checked="true"] {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+.note-text img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 4px 0;
+}
 
 .note.selected {
   outline: 2px solid rgba(255, 255, 255, 0.6);
@@ -333,24 +397,34 @@ body {
 }
 .color-opt:hover { transform: scale(1.1); }
 
-/* ---------- Format toolbar ---------- */
+/* ---------- Format toolbar ----------
+   A single flex-wrap row (wraps onto a second/third line on narrow
+   screens rather than needing its own responsive breakpoints) that shows
+   itself when the pointer hovers a note, or the note is selected (see
+   showFormatToolbarFor/selectNote in script.js) -- there's no dedicated
+   trigger button on the note itself anymore. */
 .format-toolbar {
   position: absolute;
   z-index: 5;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  padding: 8px;
+  padding: 6px 8px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  width: 240px;
+  width: max-content;
+  max-width: min(520px, 92vw);
 }
 
-.format-row {
-  display: flex;
-  gap: 6px;
+.format-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 22px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
 .format-btn {
@@ -367,10 +441,10 @@ body {
 }
 .format-btn:hover { background: #2a2f3a; }
 .format-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.format-btn.disabled { opacity: 0.35; cursor: default; }
+.format-btn.disabled:hover { background: var(--panel-2); }
 
 .format-select {
-  flex: 1;
-  min-width: 0;
   height: 30px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -378,8 +452,21 @@ body {
   color: var(--text);
   font-size: 12px;
   padding: 0 4px;
+  flex-shrink: 0;
 }
-.format-select-wide { flex: 2; }
+.format-select-wide { width: 110px; }
+#fmtAlignSelect { width: 84px; }
+
+.format-color {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  padding: 2px;
+  cursor: pointer;
+}
 
 /* ---------- Note fields (custom metadata) ---------- */
 .note-fields-row {
