@@ -26,9 +26,14 @@
   const fmtFontSelect = document.getElementById("fmtFontSelect");
   const fmtSizeSelect = document.getElementById("fmtSizeSelect");
   const fmtColorInput = document.getElementById("fmtColorInput");
+  const fmtStrikeBtn = document.getElementById("fmtStrikeBtn");
   const fmtBulletBtn = document.getElementById("fmtBulletBtn");
   const fmtNumberBtn = document.getElementById("fmtNumberBtn");
+  const fmtChecklistBtn = document.getElementById("fmtChecklistBtn");
   const fmtLinkBtn = document.getElementById("fmtLinkBtn");
+  const fmtAlignSelect = document.getElementById("fmtAlignSelect");
+  const fmtIndentBtn = document.getElementById("fmtIndentBtn");
+  const fmtOutdentBtn = document.getElementById("fmtOutdentBtn");
   const fmtImageBtn = document.getElementById("fmtImageBtn");
   const noteImageInput = document.getElementById("noteImageInput");
   const noteFieldsPopover = document.getElementById("noteFieldsPopover");
@@ -52,6 +57,12 @@
   const MAX_NOTE_H = 560;
   const COLORS = ["#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8"];
   const CURSOR_COLORS = ["#ff6b3d", "#4dd0e1", "#ff4d4f", "#8bc34a", "#ba68c8", "#ffd54f"];
+  // How far into a checklist <li>'s left padding (where its CSS-drawn
+  // checkbox lives, in style.css) a click still counts as toggling the box
+  // rather than placing a text caret -- kept as an em multiple, not a fixed
+  // pixel count, since note text is autofit-scaled anywhere from 13px to
+  // 64px. Must match ul.checklist li's padding-left in style.css.
+  const CHECKLIST_BOX_EM = 1.7;
 
   // Real font names, mapped to a stack with sensible cross-platform fallbacks.
   // Also doubles as the allowlist the HTML sanitizer checks font-family values against.
@@ -83,12 +94,15 @@
   // validate anything -- so any HTML from a remote peer (or from a board's
   // stored history) must be sanitized before it's ever assigned to innerHTML,
   // otherwise one malicious peer could run script in every other viewer's tab.
-  const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "SPAN", "BR", "DIV", "H1", "H2", "H3", "P", "A", "IMG", "UL", "OL", "LI"]);
+  const ALLOWED_TAGS = new Set([
+    "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "SPAN", "BR", "DIV", "H1", "H2", "H3", "P", "A", "IMG", "UL", "OL", "LI",
+  ]);
   const DROP_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "SVG", "TEMPLATE"]);
   const FONT_SIZE_RE = /^(1[0-9]|[2-9][0-9]|1[0-4][0-9])px$/;
   const FONT_WEIGHT_RE = /^(bold|normal|[1-9]00)$/;
   const FONT_STYLE_RE = /^(italic|normal)$/;
-  const TEXT_DECORATION_RE = /^(underline|none)$/;
+  const TEXT_DECORATION_RE = /^(underline|line-through|none)$/;
+  const TEXT_ALIGN_RE = /^(left|center|right|justify)$/;
   const COLOR_RE = /^(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\))$/;
   // Only http(s)/mailto links: anything else (javascript:, data:, etc.) could
   // run script or otherwise misbehave when clicked.
@@ -111,6 +125,7 @@
       else if (prop === "font-style" && FONT_STYLE_RE.test(value)) out.push(`font-style:${value}`);
       else if (prop === "text-decoration" && TEXT_DECORATION_RE.test(value)) out.push(`text-decoration:${value}`);
       else if (prop === "color" && COLOR_RE.test(value)) out.push(`color:${value}`);
+      else if (prop === "text-align" && TEXT_ALIGN_RE.test(value)) out.push(`text-align:${value}`);
     }
     return out.join(";");
   }
@@ -168,6 +183,19 @@
           } else {
             node.remove();
           }
+        } else if (tag === "UL") {
+          // The only class this app ever writes is the literal string
+          // "checklist" (see applyChecklist) -- anything else is dropped
+          // rather than let a peer's HTML smuggle an arbitrary class name in.
+          const isChecklist = node.getAttribute("class") === "checklist";
+          sanitizeStyledElement(node);
+          if (isChecklist) node.setAttribute("class", "checklist");
+          sanitizeWalk(node);
+        } else if (tag === "LI") {
+          const checked = node.getAttribute("data-checked");
+          sanitizeStyledElement(node);
+          if (checked === "true" || checked === "false") node.setAttribute("data-checked", checked);
+          sanitizeWalk(node);
         } else {
           sanitizeStyledElement(node);
           sanitizeWalk(node);
@@ -405,10 +433,6 @@
     const colorBtn = document.createElement("button");
     colorBtn.textContent = "●";
     colorBtn.title = "Color";
-    const fontBtn = document.createElement("button");
-    fontBtn.textContent = "Aa";
-    fontBtn.title = "Format text";
-    fontBtn.style.fontSize = "10px";
     const fieldsBtn = document.createElement("button");
     fieldsBtn.textContent = "🏷";
     fieldsBtn.title = "Fields";
@@ -417,7 +441,6 @@
     delBtn.textContent = "×";
     delBtn.title = "Delete";
     header.appendChild(colorBtn);
-    header.appendChild(fontBtn);
     header.appendChild(fieldsBtn);
     header.appendChild(delBtn);
 
@@ -448,10 +471,6 @@
       e.stopPropagation();
       openColorPopover(note.id);
     });
-    fontBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openFormatToolbar(note.id);
-    });
     fieldsBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       openNoteFieldsPopover(note.id);
@@ -480,6 +499,36 @@
       e.preventDefault();
       const text = (e.clipboardData || window.clipboardData).getData("text/plain");
       document.execCommand("insertText", false, text);
+    });
+    // Checklist items store their checked state as a data attribute (see
+    // applyChecklist) rather than a real <input type="checkbox">, so there's
+    // nothing for contenteditable to fight over -- clicking the rendered
+    // checkbox (a ::before box drawn inside the <li>'s own CHECKLIST_BOX_EM
+    // of left padding, matching the CSS, so offsetX there is never negative)
+    // just flips the attribute instead of placing a caret there. The hit
+    // width is computed from the li's current (autofit-scaled) font-size
+    // rather than a fixed pixel constant, since note text can render
+    // anywhere from 13px to 64px.
+    editor.addEventListener("mousedown", (e) => {
+      const li = e.target.closest("li");
+      if (!li || !li.closest("ul.checklist") || !editor.contains(li)) return;
+      const hitWidth = parseFloat(getComputedStyle(li).fontSize) * CHECKLIST_BOX_EM;
+      if (e.offsetX >= 0 && e.offsetX < hitWidth) {
+        e.preventDefault();
+        const checked = li.getAttribute("data-checked") === "true";
+        li.setAttribute("data-checked", checked ? "false" : "true");
+        sendHtmlUpdate(note.id);
+      }
+    });
+    el.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "mouse") return;
+      hoverNoteId = note.id;
+      showFormatToolbarFor(note.id);
+    });
+    el.addEventListener("pointerleave", (e) => {
+      if (e.pointerType !== "mouse") return;
+      if (hoverNoteId === note.id) hoverNoteId = null;
+      scheduleFormatToolbarHideCheck();
     });
 
     noteEls.set(note.id, { el, header, editor, colorBtn, fieldsRow });
@@ -525,6 +574,10 @@
     selectedId = id;
     bringToFront(id);
     if (noteEls.has(id)) noteEls.get(id).el.classList.add("selected");
+    // Selecting a note is how the format toolbar appears on touch, where
+    // there's no hover signal -- on desktop this just reinforces what
+    // hovering the note already showed (see pointerenter above).
+    showFormatToolbarFor(id);
   }
 
   function deselectNote() {
@@ -621,14 +674,32 @@
     };
   }
 
-  // Positions a popover under a note's header, flipping above it instead of
-  // clamping in place when there isn't room below -- clamping alone can push
-  // a tall popover (the format toolbar) up far enough to overlap the very
-  // button row it was opened from.
-  function positionPopoverNear(popoverEl, id) {
+  // Same idea, but covering the note's whole body rather than just its
+  // 20px header strip -- used to anchor the format toolbar, which (unlike
+  // the color/fields popovers, still opened by clicking a small header
+  // button) shows on hover alone and is itself often taller/wider than a
+  // small note, so anchoring it to only the header would routinely leave it
+  // overlapping the note's own text underneath.
+  function noteFullScreenRect(id) {
+    const note = notes.get(id);
+    const wrapRect = boardWrap.getBoundingClientRect();
+    const left = wrapRect.left + (note.x - camera.x) * camera.scale;
+    const top = wrapRect.top + (note.y - camera.y) * camera.scale;
+    return {
+      left,
+      top,
+      right: left + note.w * camera.scale,
+      bottom: top + note.h * camera.scale,
+    };
+  }
+
+  // Positions a popover just outside `anchorRect` (below it if there's room,
+  // above it otherwise) rather than clamping in place when there isn't --
+  // clamping alone can push a tall popover up far enough to overlap the very
+  // element it was anchored to.
+  function positionPopoverNear(popoverEl, anchorRect) {
     popoverEl.hidden = false; // must be visible/laid out to measure
     const { width, height } = popoverEl.getBoundingClientRect();
-    const anchorRect = noteHeaderScreenRect(id);
     const wrapRect = boardWrap.getBoundingClientRect();
     const left = clamp(anchorRect.left - wrapRect.left, 4, wrapRect.width - width - 4);
     const spaceBelow = wrapRect.height - (anchorRect.bottom - wrapRect.top);
@@ -647,7 +718,7 @@
     closeFormatToolbar();
     closeNoteFieldsPopover();
     colorTargetId = id;
-    positionPopoverNear(colorPopover, id);
+    positionPopoverNear(colorPopover, noteHeaderScreenRect(id));
   }
   function closeColorPopover() {
     colorPopover.hidden = true;
@@ -716,16 +787,41 @@
     sendHtmlUpdate(formatTargetId);
   }
 
+  // Returns the <li> the current selection is inside, scoped to `editor` --
+  // used to gate list-only commands (checklist active-state, indent/outdent)
+  // so they only ever act on a real in-list cursor position, never on
+  // whatever ensureEditableSelection's "nothing selected" fallback would
+  // otherwise select.
+  function selectionListItem(editor) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    const node = sel.getRangeAt(0).commonAncestorContainer;
+    const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    return el && editor.contains(el) ? el.closest("li") : null;
+  }
+
   function refreshToolbarState() {
     const editor = formatEditor();
     if (!editor) return;
     fmtBoldBtn.classList.toggle("active", document.queryCommandState("bold"));
     fmtItalicBtn.classList.toggle("active", document.queryCommandState("italic"));
     fmtUnderlineBtn.classList.toggle("active", document.queryCommandState("underline"));
+    fmtStrikeBtn.classList.toggle("active", document.queryCommandState("strikeThrough"));
     fmtBulletBtn.classList.toggle("active", document.queryCommandState("insertUnorderedList"));
     fmtNumberBtn.classList.toggle("active", document.queryCommandState("insertOrderedList"));
+    const li = selectionListItem(editor);
+    fmtChecklistBtn.classList.toggle("active", !!(li && li.closest("ul.checklist")));
+    fmtIndentBtn.classList.toggle("disabled", !li);
+    fmtOutdentBtn.classList.toggle("disabled", !li);
     const block = document.queryCommandValue("formatBlock").toUpperCase();
     fmtHeadingSelect.value = block === "H2" || block === "H3" ? block : "P";
+    fmtAlignSelect.value = document.queryCommandState("justifyCenter")
+      ? "center"
+      : document.queryCommandState("justifyRight")
+      ? "right"
+      : document.queryCommandState("justifyFull")
+      ? "justify"
+      : "left";
   }
 
   // Replacing the <font> marker elements execCommand produces invalidates
@@ -785,21 +881,60 @@
     reselectSpans(spans);
   }
 
+  // A checklist is a plain <ul> (so it survives round-tripping through
+  // execCommand like any other list) marked with class="checklist", whose
+  // <li>s carry a data-checked attribute the sanitizer allowlists -- see the
+  // "Checklist item toggling" mousedown handler in createNoteElement for how
+  // that attribute gets flipped. There's no native execCommand for this, so
+  // it's built on top of insertUnorderedList: whichever <ul>(s) that command
+  // creates (comparing before/after) are the ones just marked as a checklist.
+  function applyChecklist(editor) {
+    const before = new Set(editor.querySelectorAll("ul"));
+    document.execCommand("insertUnorderedList");
+    editor.querySelectorAll("ul").forEach((ul) => {
+      if (before.has(ul)) return;
+      ul.classList.add("checklist");
+      ul.querySelectorAll("li").forEach((li) => {
+        if (!li.hasAttribute("data-checked")) li.setAttribute("data-checked", "false");
+      });
+    });
+  }
+
   fmtBoldBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtItalicBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtUnderlineBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtStrikeBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtBulletBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtNumberBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtChecklistBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtLinkBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtIndentBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtOutdentBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtImageBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtBoldBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("bold")));
   fmtItalicBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("italic")));
   fmtUnderlineBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("underline")));
+  fmtStrikeBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("strikeThrough")));
   fmtBulletBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("insertUnorderedList")));
   fmtNumberBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("insertOrderedList")));
+  fmtChecklistBtn.addEventListener("click", () => withEditorSelection((editor) => applyChecklist(editor)));
+  fmtIndentBtn.addEventListener("click", () => {
+    const editor = formatEditor();
+    if (!editor || !selectionListItem(editor)) return;
+    withEditorSelection(() => document.execCommand("indent"));
+  });
+  fmtOutdentBtn.addEventListener("click", () => {
+    const editor = formatEditor();
+    if (!editor || !selectionListItem(editor)) return;
+    withEditorSelection(() => document.execCommand("outdent"));
+  });
   fmtHeadingSelect.addEventListener("change", () => {
     const tag = fmtHeadingSelect.value === "P" ? "DIV" : fmtHeadingSelect.value;
     withEditorSelection(() => document.execCommand("formatBlock", false, `<${tag}>`));
+  });
+  fmtAlignSelect.addEventListener("change", () => {
+    const cmd = { left: "justifyLeft", center: "justifyCenter", right: "justifyRight", justify: "justifyFull" }[fmtAlignSelect.value];
+    withEditorSelection(() => document.execCommand(cmd));
   });
   fmtFontSelect.addEventListener("change", () => {
     withEditorSelection((editor) => applyFontFamily(editor, fmtFontSelect.value));
@@ -925,19 +1060,47 @@
     }
   });
 
-  function openFormatToolbar(id) {
-    if (!formatToolbar.hidden && formatTargetId === id) { closeFormatToolbar(); return; }
+  // Hovering a note (desktop; see the pointerenter/pointerleave listeners in
+  // createNoteElement) or selecting one (touch tap, or a desktop click --
+  // see selectNote) shows its format toolbar; deliberately never focuses or
+  // touches the editor's own selection itself, since merely moving the
+  // mouse over a note must not yank the caret away from wherever the user
+  // is actually typing.
+  let hoverNoteId = null;
+  let hoverHideTimer = null;
+
+  function showFormatToolbarFor(id) {
+    if (!noteEls.has(id)) return;
+    if (formatTargetId === id && !formatToolbar.hidden) {
+      refreshToolbarState();
+      return;
+    }
     closeColorPopover();
     closeNoteFieldsPopover();
     formatTargetId = id;
-    positionPopoverNear(formatToolbar, id);
-    const editor = formatEditor();
-    if (editor) {
-      editor.focus();
-      ensureEditableSelection(id, editor);
-    }
+    positionPopoverNear(formatToolbar, noteFullScreenRect(id));
     refreshToolbarState();
   }
+
+  // The toolbar sits visually next to (not inside) the note, so moving the
+  // mouse from one to the other briefly leaves both -- a short grace period,
+  // cancelled by re-entering either, keeps that hop from closing it.
+  function scheduleFormatToolbarHideCheck() {
+    clearTimeout(hoverHideTimer);
+    hoverHideTimer = setTimeout(() => {
+      if (formatTargetId && formatTargetId !== selectedId && formatTargetId !== hoverNoteId) {
+        closeFormatToolbar();
+      }
+    }, 300);
+  }
+
+  formatToolbar.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "mouse") clearTimeout(hoverHideTimer);
+  });
+  formatToolbar.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "mouse") scheduleFormatToolbarHideCheck();
+  });
+
   function closeFormatToolbar() {
     formatToolbar.hidden = true;
     formatTargetId = null;
@@ -1120,7 +1283,7 @@
     closeFormatToolbar();
     fieldsPopoverNoteId = id;
     renderNoteFieldsPopoverContent(id);
-    positionPopoverNear(noteFieldsPopover, id);
+    positionPopoverNear(noteFieldsPopover, noteHeaderScreenRect(id));
   }
 
   function closeNoteFieldsPopover() {
@@ -1213,7 +1376,7 @@
             else selected.add(opt.id);
             setNoteFieldValue(id, field.id, [...selected]);
             renderNoteFieldsPopoverContent(id);
-            positionPopoverNear(noteFieldsPopover, id);
+            positionPopoverNear(noteFieldsPopover, noteHeaderScreenRect(id));
           });
           wrap.appendChild(optBtn);
         }

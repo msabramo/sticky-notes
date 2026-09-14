@@ -26,21 +26,24 @@ forcing software rendering, etc.) that a pixel-based board would run
 into on some mobile browsers.
 
 A note's content is a small, allowlisted subset of HTML (bold/italic/
-underline, headings, bullet/numbered lists, links, images, and `<span>`s
-carrying only font-family/font-size/font-weight/font-style/text-decoration/
-color) rather than plain text, so a note can mix a bold heading with
-regular, italic, differently-sized/-fonted/-colored text, lists, links,
-and images in one body. Because the realtime server relays whatever any
-peer sends without validating it, every client runs incoming HTML (from a
-live peer update *and* from a board's stored history) through an
-allowlist sanitizer before ever assigning it to `innerHTML` — otherwise
-one malicious peer could run script in every other viewer's tab just by
-joining the board. The same sanitizer restricts links to `http(s):`/
-`mailto:` URLs (forcing `target="_blank" rel="noopener noreferrer"` on
-every one, regardless of what a peer's HTML said) and restricts images to
-`data:image/...;base64,...` URIs — never a remote `src`, which would let
-a peer plant a tracking pixel that phones home to a third party the
-instant anyone merely opens the board.
+underline/strikethrough, headings, alignment, bullet/numbered/checklist
+lists, links, images, and `<span>`s carrying only font-family/font-size/
+font-weight/font-style/text-decoration/color) rather than plain text, so a
+note can mix a bold heading with regular, italic, differently-sized/
+-fonted/-colored/-aligned text, lists, links, and images in one body.
+Because the realtime server relays whatever any peer sends without
+validating it, every client runs incoming HTML (from a live peer update
+*and* from a board's stored history) through an allowlist sanitizer before
+ever assigning it to `innerHTML` — otherwise one malicious peer could run
+script in every other viewer's tab just by joining the board. The same
+sanitizer restricts links to `http(s):`/`mailto:` URLs (forcing
+`target="_blank" rel="noopener noreferrer"` on every one, regardless of
+what a peer's HTML said), restricts images to `data:image/...;base64,...`
+URIs — never a remote `src`, which would let a peer plant a tracking pixel
+that phones home to a third party the instant anyone merely opens the
+board — and, for checklists, only ever accepts the literal class name
+`checklist` and a `data-checked` value of `true`/`false`, never an
+arbitrary attribute value from a peer's HTML.
 
 The board lives on a fixed-size "world" area (3000×2000 CSS px)
 independent of anyone's window size, panned/zoomed via a CSS `transform`
@@ -58,22 +61,28 @@ same coordinate space, so notes always line up between devices.
 - **Edit text** — tap/click the note's body.
 - **Resize a note** — drag the small grip in its bottom-right corner.
 - **Recolor** — tap the ● button in a note's header for a small palette.
-- **Format text** — select some text and tap the **Aa** button in a
-  note's header for bold/italic/underline, headings, a font picker
-  (a real list of named fonts, not just five presets), font size, and
-  text color. With nothing selected, a change applies to the whole note.
-- **Lists** — in the same **Aa** panel, the bullet and numbered-list
-  buttons turn the current line(s) into a list, the same way they work in
-  any rich text editor.
-- **Links** — select some text and tap the 🔗 button in the **Aa** panel,
-  then enter a URL to turn that text into a hyperlink. Links open in a new
-  tab; inside the note itself, click-to-edit means you'll generally
-  Ctrl/Cmd-click a link to actually follow it, same as most rich text
-  editors.
-- **Images** — tap the 🖼 button in the **Aa** panel to insert a photo at
-  your cursor (or in place of the current selection). Images are
-  downscaled and recompressed in the browser before they're embedded, to
-  keep notes from ballooning in size.
+- **Format text** — hover a note (or tap/select it on a touch device) to
+  reveal its formatting toolbar, with no dedicated button of its own on the
+  note: font, size, text color, bold/italic/underline/strikethrough,
+  headings, alignment, and indent/outdent. Select some text first to format
+  just that part; with nothing selected, a change applies to the whole
+  note. The toolbar stays open while the note is selected (i.e. while
+  you're actively editing it) even if your mouse moves away; otherwise it
+  follows the hover and disappears once you move on.
+- **Lists** — in the same toolbar, the bullet, numbered, and checklist
+  buttons turn the current line(s) into a list. Tap a checklist item's own
+  checkbox (its left edge) to check it off — that toggles independently of
+  placing a text cursor, the same way it works in any note-taking app.
+  Indent/outdent (only enabled while your cursor is actually inside a list
+  item) nest an item under the one above it.
+- **Links** — select some text and tap the 🔗 button, then enter a URL to
+  turn that text into a hyperlink. Links open in a new tab; inside the note
+  itself, click-to-edit means you'll generally Ctrl/Cmd-click a link to
+  actually follow it, same as most rich text editors.
+- **Images** — tap the 🖼 button to insert a photo at your cursor (or in
+  place of the current selection). Images are downscaled and recompressed
+  in the browser before they're embedded, to keep notes from ballooning in
+  size.
 - **Custom fields** — tap the 🏷 button in a note's header to set values for
   whatever metadata fields the board defines (e.g. Status, Assignee,
   Priority, Tags, Due date), shown as small colored chips on the note.
