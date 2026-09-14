@@ -15,6 +15,7 @@
   const menuBackdrop = document.getElementById("menuBackdrop");
   const clearBtn = document.getElementById("clearBtn");
   const createColumnsBtn = document.getElementById("createColumnsBtn");
+  const createColumnsFromFieldBtn = document.getElementById("createColumnsFromFieldBtn");
   const drawZoneBtn = document.getElementById("drawZoneBtn");
   const copyLinkBtn = document.getElementById("copyLinkBtn");
   const boardCodeEl = document.getElementById("boardCode");
@@ -49,6 +50,9 @@
   const MIN_ZONE_W = 100;
   const MIN_ZONE_H = 80;
   const ZONE_LABEL_MAX_LEN = 80;
+  const ZONE_HEADER_H = 30; // px, must match .zone-header's CSS height
+  const ZONE_STACK_MARGIN = 14; // gap between a zone's edge and the notes stacked inside it
+  const ZONE_STACK_GAP = 12; // gap between consecutively stacked notes
   const COLORS = ["#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8"];
   const CURSOR_COLORS = ["#ff6b3d", "#4dd0e1", "#ff4d4f", "#8bc34a", "#ba68c8", "#ffd54f"];
 
@@ -334,6 +338,17 @@
     closeMenu();
   });
 
+  // Lays out `count` equal-width columns spanning the whole board, used by
+  // both "Create Columns..." (arbitrary names) and "Create Columns from
+  // Field..." (one column per select-field option) below.
+  function layoutEqualColumns(count) {
+    const margin = 24;
+    const gap = 16;
+    const w = (WORLD_W - margin * 2 - gap * (count - 1)) / count;
+    const h = WORLD_H - margin * 2;
+    return Array.from({ length: count }, (_, i) => ({ x: margin + i * (w + gap), y: margin, w, h }));
+  }
+
   createColumnsBtn.addEventListener("click", () => {
     closeMenu();
     const input = prompt("Enter column names, separated by commas:", "To do, In progress, Done");
@@ -343,12 +358,38 @@
       alert("Enter at least 2 column names, separated by commas.");
       return;
     }
-    const margin = 24;
-    const gap = 16;
-    const colW = (WORLD_W - margin * 2 - gap * (names.length - 1)) / names.length;
-    const colH = WORLD_H - margin * 2;
-    names.forEach((name, i) => {
-      addZone(margin + i * (colW + gap), margin, colW, colH, name);
+    const cols = layoutEqualColumns(names.length);
+    names.forEach((name, i) => addZone(cols[i].x, cols[i].y, cols[i].w, cols[i].h, name));
+  });
+
+  // One column per option of an existing single-select field (e.g.
+  // "Assignee" or "Status"), each linked to that option -- dropping a note
+  // into one sets the note's field value to match, and changing the field
+  // value on a note moves it into the matching column (see
+  // syncNoteFieldToZone / syncZonePositionToField).
+  createColumnsFromFieldBtn.addEventListener("click", () => {
+    closeMenu();
+    const selectFields = boardFields.filter((f) => f.type === "select" && f.options.length);
+    if (!selectFields.length) {
+      alert(
+        'No single-select fields with options yet. Add one from the menu → Manage Fields first (e.g. the "Status" preset).'
+      );
+      return;
+    }
+    let field = selectFields[0];
+    if (selectFields.length > 1) {
+      const listText = selectFields.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+      const input = prompt(`Create one column per option of which field?\n${listText}`, "1");
+      if (input === null) return;
+      field = selectFields[parseInt(input, 10) - 1];
+      if (!field) {
+        alert("Not a valid field number.");
+        return;
+      }
+    }
+    const cols = layoutEqualColumns(field.options.length);
+    field.options.forEach((opt, i) => {
+      addZone(cols[i].x, cols[i].y, cols[i].w, cols[i].h, opt.label, { fieldId: field.id, optionId: opt.id });
     });
   });
 
@@ -497,14 +538,54 @@
   }
 
   // ---------- Zones (columns / custom regions) ----------
-  // A zone is just a labeled rectangle drawn behind the notes -- it doesn't
-  // track which notes are "inside" it; it's purely a visual aid for
-  // dragging notes into, same as any other spot on the board.
-  const zones = new Map(); // id -> {id,x,y,w,h,label}
+  // A zone is a labeled rectangle drawn behind the notes. Most zones are
+  // purely a visual aid -- nothing tracks which notes are "inside" one.
+  // A zone created via "Create Columns from Field" is the exception: it
+  // carries fieldId/optionId tying it to one option of a board select
+  // field, and note<->zone membership is kept in sync bidirectionally (see
+  // syncNoteFieldToZone / syncZonePositionToField below) by matching each
+  // note's *current position* against zone rectangles on demand -- there's
+  // still no persisted note->zone link, so this only reconciles on a drag
+  // drop or a field-value edit, not continuously.
+  const zones = new Map(); // id -> {id,x,y,w,h,label,fieldId?,optionId?}
   const zoneEls = new Map(); // id -> {el, header, labelEl}
 
   function clampZoneLabel(label) {
     return String(label == null ? "" : label).trim().slice(0, ZONE_LABEL_MAX_LEN) || "Zone";
+  }
+
+  // Resolves a field-linked zone's live field/option definitions, or null
+  // if the zone isn't field-linked (or the field/option it pointed to was
+  // since renamed away/deleted from Manage Fields).
+  function zoneFieldOption(zone) {
+    if (!zone.fieldId || !zone.optionId) return null;
+    const field = boardFields.find((f) => f.id === zone.fieldId);
+    if (!field) return null;
+    const option = findOptionDef(field, zone.optionId);
+    return option ? { field, option } : null;
+  }
+
+  // Tints a field-linked zone's header with its option's color, so it's
+  // visually obvious the column is wired to a field (vs. a plain column or
+  // a freehand region). Safe to call on any zone; no-ops otherwise.
+  function refreshZoneFieldTint(id) {
+    const zone = zones.get(id);
+    const refs = zoneEls.get(id);
+    if (!zone || !refs) return;
+    const match = zoneFieldOption(zone);
+    if (match) {
+      refs.header.style.background = match.option.color + "33";
+      refs.header.style.borderBottomColor = match.option.color;
+      refs.labelEl.title = `Tap to rename — linked to ${match.field.name}: ${match.option.label}`;
+    } else {
+      refs.header.style.background = "";
+      refs.header.style.borderBottomColor = "";
+      refs.labelEl.title = "Tap to rename";
+    }
+  }
+
+  function refreshAllZoneFieldTints() {
+    for (const id of zones.keys()) refreshZoneFieldTint(id);
   }
 
   function createZoneElement(zone) {
@@ -551,6 +632,7 @@
     });
 
     zoneEls.set(zone.id, { el, header, labelEl });
+    refreshZoneFieldTint(zone.id);
     return el;
   }
 
@@ -569,9 +651,11 @@
     positionZoneEl(zone.id);
   }
 
-  function addZone(x, y, w, h, label) {
+  // `extra` carries optional {fieldId, optionId} to link this zone (a
+  // kanban-style column) to one option of a board select field.
+  function addZone(x, y, w, h, label, extra) {
     const id = makeId();
-    const zone = { id, x, y, w, h, label: clampZoneLabel(label) };
+    const zone = { id, x, y, w, h, label: clampZoneLabel(label), ...(extra || {}) };
     addZoneLocally(zone);
     MP.sendZoneCreate(zone);
     return id;
@@ -608,6 +692,153 @@
       if (typeof data.h === "number") refs.el.style.height = zone.h + "px";
     }
     positionZoneEl(data.id);
+    refreshZoneFieldTint(data.id);
+  }
+
+  // ---------- Zone <-> note geometry (stacking, membership, collisions) ----------
+  function zoneContentRect(zone) {
+    return { x: zone.x, y: zone.y + ZONE_HEADER_H, w: zone.w, h: Math.max(0, zone.h - ZONE_HEADER_H) };
+  }
+
+  function noteCenter(note) {
+    return { x: note.x + note.w / 2, y: note.y + note.h / 2 };
+  }
+
+  function pointInRect(p, r) {
+    return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+  }
+
+  // A note "belongs" to whichever zone its center point falls inside --
+  // the same rule used to decide field membership and stacking order. If
+  // zones overlap (rare -- freehand regions can be drawn on top of each
+  // other), the first one created wins, since Map iteration is insertion
+  // order.
+  function findContainingZone(point) {
+    for (const zone of zones.values()) {
+      if (pointInRect(point, zoneContentRect(zone))) return zone;
+    }
+    return null;
+  }
+
+  function notesInZone(zoneId, excludeNoteId) {
+    const zone = zones.get(zoneId);
+    if (!zone) return [];
+    const r = zoneContentRect(zone);
+    const result = [];
+    for (const note of notes.values()) {
+      if (note.id === excludeNoteId) continue;
+      if (pointInRect(noteCenter(note), r)) result.push(note);
+    }
+    return result;
+  }
+
+  // Auto-arranges `note` into zone's stack of notes, top to bottom, single
+  // column. Where it lands in the order depends on where its *dropped*
+  // center point falls relative to the other notes' current centers --
+  // above the first note's midpoint puts it first, below the last puts it
+  // last, and between two notes' midpoints inserts it between them. Every
+  // other note in the zone is repositioned to keep the stack gapless, and
+  // those repositions are broadcast; the caller is responsible for
+  // broadcasting `note`'s own final position.
+  function snapNoteIntoZoneStack(note, zone) {
+    const r = zoneContentRect(zone);
+    const others = notesInZone(zone.id, note.id).sort((a, b) => a.y - b.y);
+    const dropCenterY = note.y + note.h / 2;
+    let insertIndex = others.length;
+    for (let i = 0; i < others.length; i++) {
+      if (dropCenterY < others[i].y + others[i].h / 2) {
+        insertIndex = i;
+        break;
+      }
+    }
+    others.splice(insertIndex, 0, note);
+    let y = r.y + ZONE_STACK_MARGIN;
+    for (const n of others) {
+      n.x = zone.x + Math.max(0, (zone.w - n.w) / 2);
+      n.y = y;
+      y += n.h + ZONE_STACK_GAP;
+      positionNoteEl(n.id);
+      if (n.id !== note.id) MP.sendMove(n.id, n.x, n.y, n.z);
+    }
+  }
+
+  // The Option/Alt-held "manual placement" path: keeps wherever the user
+  // dropped the note, just nudged fully inside the zone so it doesn't end
+  // up straddling the zone's border.
+  function clampNoteFullyInsideZone(note, zone) {
+    const r = zoneContentRect(zone);
+    note.x = clamp(note.x, r.x, Math.max(r.x, r.x + r.w - note.w));
+    note.y = clamp(note.y, r.y, Math.max(r.y, r.y + r.h - note.h));
+  }
+
+  // A note that lands outside every zone (by the center-point rule) should
+  // still never end up straddling a zone's border -- so if it overlaps one
+  // without being "inside" it, push it out through whichever edge it's
+  // penetrating the least.
+  function pushNoteOutOfOverlappingZones(note) {
+    for (const zone of zones.values()) {
+      const r = zoneContentRect(zone);
+      const overlapsX = note.x < r.x + r.w && note.x + note.w > r.x;
+      const overlapsY = note.y < r.y + r.h && note.y + note.h > r.y;
+      if (!(overlapsX && overlapsY)) continue;
+      const penLeft = note.x + note.w - r.x;
+      const penRight = r.x + r.w - note.x;
+      const penTop = note.y + note.h - r.y;
+      const penBottom = r.y + r.h - note.y;
+      const minPen = Math.min(penLeft, penRight, penTop, penBottom);
+      if (minPen === penLeft) note.x = r.x - note.w;
+      else if (minPen === penRight) note.x = r.x + r.w;
+      else if (minPen === penTop) note.y = r.y - note.h;
+      else note.y = r.y + r.h;
+    }
+  }
+
+  // ---------- Field <-> zone bidirectional sync ----------
+  // Drop -> field: dropping a note into a field-linked zone sets that
+  // field's value on the note to the zone's option.
+  function syncNoteFieldToZone(note, zone) {
+    if (!zone.fieldId || !zone.optionId) return;
+    if (noteFieldValues(note)[zone.fieldId] === zone.optionId) return;
+    setNoteFieldValue(note.id, zone.fieldId, zone.optionId);
+  }
+
+  // Field -> drop: changing a select field's value (from the note's fields
+  // popover) moves the note into whichever zone is linked to that
+  // field/option, if any -- unless it's already there, which avoids
+  // undoing the drop-side sync above re-triggering a redundant relayout.
+  function syncZonePositionToField(note, fieldId, value) {
+    if (!value) return;
+    const field = boardFields.find((f) => f.id === fieldId);
+    if (!field || field.type !== "select") return;
+    const targetZone = [...zones.values()].find((z) => z.fieldId === fieldId && z.optionId === value);
+    if (!targetZone) return;
+    const current = findContainingZone(noteCenter(note));
+    if (current && current.id === targetZone.id) return;
+    snapNoteIntoZoneStack(note, targetZone);
+    positionNoteEl(note.id);
+    MP.sendMove(note.id, note.x, note.y, note.z);
+  }
+
+  // Resolves the destination of a note drag once the pointer is released:
+  // finds which zone (if any) the note's dropped center point landed in,
+  // arranges it there (auto-stacked, or just clamped-in-bounds if Option/
+  // Alt is held), keeps a field-linked zone's field in sync, and otherwise
+  // makes sure the note isn't left straddling some other zone's border.
+  function finalizeNoteDrop(id, altPlacement) {
+    const note = notes.get(id);
+    if (!note) return;
+    const zone = findContainingZone(noteCenter(note));
+    if (zone) {
+      if (altPlacement) clampNoteFullyInsideZone(note, zone);
+      else snapNoteIntoZoneStack(note, zone);
+      positionNoteEl(id);
+      MP.sendMove(id, note.x, note.y, note.z);
+      syncNoteFieldToZone(note, zone);
+    } else {
+      pushNoteOutOfOverlappingZones(note);
+      positionNoteEl(id);
+      MP.sendMove(id, note.x, note.y, note.z);
+    }
   }
 
   function selectNote(id) {
@@ -999,6 +1230,7 @@
     renderFieldsManager();
     renderAllNoteFieldRows();
     if (fieldsPopoverNoteId) renderNoteFieldsPopoverContent(fieldsPopoverNoteId);
+    refreshAllZoneFieldTints();
   }
 
   function applyRemoteFieldDefs(fields) {
@@ -1006,6 +1238,7 @@
     renderFieldsManager();
     renderAllNoteFieldRows();
     if (fieldsPopoverNoteId) renderNoteFieldsPopoverContent(fieldsPopoverNoteId);
+    refreshAllZoneFieldTints();
   }
 
   // ---------- Per-note field chips ----------
@@ -1089,6 +1322,7 @@
     else note.fields[fieldId] = value;
     renderNoteFieldRow(id);
     MP.sendUpdate(id, { fields: note.fields });
+    if (!isEmpty) syncZonePositionToField(note, fieldId, value);
   }
 
   function renderNoteFieldsPopoverContent(id) {
@@ -1486,6 +1720,7 @@
   let dragPointerId = null;
   let dragNoteId = null;
   let dragOffset = null;
+  let dragMoved = false; // whether a note drag actually relocated it -- a plain click shouldn't trigger zone snapping
   let lastMoveSent = 0;
   let resizePointerId = null;
   let resizeNoteId = null;
@@ -1530,6 +1765,7 @@
     dragNoteId = null;
     dragPointerId = null;
     dragOffset = null;
+    dragMoved = false;
     panPointerId = null;
     panAnchorWorld = null;
     resizeNoteId = null;
@@ -1573,6 +1809,7 @@
       dragOffset = { x: world.x - note.x, y: world.y - note.y };
       dragNoteId = id;
       dragPointerId = e.pointerId;
+      dragMoved = false;
       e.preventDefault();
       return;
     }
@@ -1657,6 +1894,7 @@
       const world = screenToWorld(e.clientX, e.clientY);
       note.x = world.x - dragOffset.x;
       note.y = world.y - dragOffset.y;
+      dragMoved = true;
       positionNoteEl(dragNoteId);
       const now = performance.now();
       if (now - lastMoveSent > 60) {
@@ -1753,10 +1991,14 @@
 
     if (dragNoteId && e.pointerId === dragPointerId) {
       const note = notes.get(dragNoteId);
-      if (note) MP.sendMove(dragNoteId, note.x, note.y, note.z);
+      if (note) {
+        if (dragMoved) finalizeNoteDrop(dragNoteId, e.altKey);
+        else MP.sendMove(dragNoteId, note.x, note.y, note.z);
+      }
       dragNoteId = null;
       dragPointerId = null;
       dragOffset = null;
+      dragMoved = false;
     }
     if (resizeNoteId && e.pointerId === resizePointerId) {
       const note = notes.get(resizeNoteId);

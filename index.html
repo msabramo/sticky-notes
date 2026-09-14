@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap" />
-  <link rel="stylesheet" href="style.css?v=6" />
+  <link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body>
   <div class="app">
@@ -78,6 +78,7 @@
     <div class="menu-divider"></div>
     <div class="menu-section">
       <button id="createColumnsBtn" class="btn">▥ Create Columns…</button>
+      <button id="createColumnsFromFieldBtn" class="btn">🏷▥ Create Columns from Field…</button>
       <button id="drawZoneBtn" class="btn">▭ Draw a Zone</button>
     </div>
     <div class="menu-divider"></div>
@@ -87,7 +88,7 @@
       <a href="?" id="newBoardLink" class="btn">✨ Start a New Board</a>
     </div>
     <div class="menu-divider"></div>
-    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, and size — select some text first to format just that part. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields). Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Use "Create Columns…" to lay out a kanban-style board (e.g. To do, In progress, Done), or "Draw a Zone" to drag out your own labeled region — tap a zone's label to rename it or its × to remove it, and drag its bottom-right corner to resize it. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
+    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, and size — select some text first to format just that part. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields). Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Use "Create Columns…" to lay out a kanban-style board (e.g. To do, In progress, Done), or "Draw a Zone" to drag out your own labeled region — tap a zone's label to rename it or its × to remove it, and drag its bottom-right corner to resize it. "Create Columns from Field…" makes one column per option of a select field (e.g. Assignee) and keeps them in sync both ways: drop a note in a column and its field updates to match, or change the field on a note and it hops to that column. Dropped notes auto-stack into an open spot in whichever column or zone they land in — drop near the top, bottom, or between two notes to choose where; hold Option (Alt) while dropping to place a note freely instead. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
   </aside>
 
   <div class="fields-modal-backdrop no-print" id="fieldsModalBackdrop"></div>
@@ -103,6 +104,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=6"></script>
+  <script src="script.js?v=7"></script>
 </body>
 </html>
