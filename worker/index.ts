@@ -11,17 +11,28 @@ import { DurableObject } from "cloudflare:workers";
  * Message shape (all fields besides `t` are opaque to the server -- it
  * just stores/relays whatever the client sends, tagging it with the
  * sender's connection id):
- *   create: { t: "create", id, x, y, w, h, color, html, rot, z }
+ *   create: { t: "create", id, x, y, w, h, color, html, rot, z, fields? }
  *   move:   { t: "move", id, x, y, z }
- *   update: { t: "update", id, html?, color?, w?, h?, z? }
+ *   update: { t: "update", id, html?, color?, w?, h?, z?, fields? }
  *
  * `html` is rich text (bold/italic/underline, headings, fonts, sizes) as a
  * limited HTML subset. The server relays it unmodified -- each client is
  * responsible for sanitizing any HTML it renders from a peer, since this
  * server applies no validation of its own.
+ *
+ * `fields` is an opaque object of board-defined custom metadata values
+ * (e.g. status/assignee/tags) keyed by field id, merged into the note like
+ * any other property -- see the `fields` message below for the definitions
+ * those ids refer to.
  *   delete: { t: "delete", id }
  *   clear:  { t: "clear" }
  *   cursor: { t: "cursor", x, y, color }  (never persisted)
+ *   fields: { t: "fields", fields }  -- replaces the board's whole custom
+ *     field schema (an array the client defines: name/type/options per
+ *     field). Stored separately from notes so "clear" (which only wipes
+ *     notes) leaves field definitions in place. A new connection receives
+ *     the current schema alongside note history: { t: "history", notes,
+ *     fields }.
  *
  * POST /board/<board-id>/vision is a separate, non-websocket endpoint: send
  * { image: "data:image/...;base64,..." } and get back { items: string[] }
@@ -39,6 +50,7 @@ interface Env {
 }
 
 const NOTE_PREFIX = "note:";
+const FIELDS_KEY = "schema:fields";
 const MAX_NOTES = 2000;
 const VISION_DAILY_LIMIT = 30;
 const CORS_HEADERS: Record<string, string> = {
@@ -128,7 +140,8 @@ export class NotesBoard extends DurableObject<Env> {
 
     const stored = await this.ctx.storage.list({ prefix: NOTE_PREFIX });
     const notes = [...stored.values()];
-    server.send(JSON.stringify({ t: "history", notes }));
+    const fields = (await this.ctx.storage.get(FIELDS_KEY)) as unknown[] | undefined;
+    server.send(JSON.stringify({ t: "history", notes, fields: fields || [] }));
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -212,6 +225,12 @@ export class NotesBoard extends DurableObject<Env> {
         break;
       }
       case "cursor": {
+        this.broadcast(out, senderId);
+        break;
+      }
+      case "fields": {
+        const fields = Array.isArray(data.fields) ? data.fields : [];
+        await this.ctx.storage.put(FIELDS_KEY, fields);
         this.broadcast(out, senderId);
         break;
       }
