@@ -66,6 +66,98 @@ body {
 .menu-btn:hover { background: #2a2f3a; }
 .menu-btn:active { transform: scale(0.94); }
 
+/* ---------- Identity (name/initials/color) & presence ---------- */
+.identity-btn {
+  cursor: pointer;
+  border: 2px solid var(--border);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.75);
+  flex-shrink: 0;
+  padding: 0;
+}
+.identity-btn:active { transform: scale(0.94); }
+
+.presence-row {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.presence-avatar {
+  width: 22px;
+  height: 22px;
+  margin-left: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--panel);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.75);
+  flex-shrink: 0;
+}
+.presence-avatar:first-child { margin-left: 0; }
+
+.identity-popover {
+  position: fixed;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  width: 220px;
+}
+.identity-popover[hidden] { display: none; }
+
+.identity-popover-hint {
+  margin: 0 0 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.identity-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.identity-field input {
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  padding: 0 8px;
+}
+#identityInitialsInput { text-transform: uppercase; }
+
+.identity-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.identity-color-opt {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+.identity-color-opt.active { border-color: #fff; }
+.identity-color-opt:hover { transform: scale(1.1); }
+
 .room-label {
   font-size: 13px;
   color: var(--text-dim);
@@ -147,6 +239,21 @@ body {
   transform: translate(-2px, -2px) rotate(-45deg);
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
 }
+
+.remote-cursor-label {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  transform: rotate(45deg);
+  background: rgba(20, 22, 26, 0.85);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.remote-cursor-label:empty { display: none; }
 
 /* ---------- Sticky note ---------- */
 .note {
@@ -368,6 +475,24 @@ body {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.user-chip-avatar {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 6.5px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.75);
 }
 
 /* ---------- Per-note fields popover ---------- */

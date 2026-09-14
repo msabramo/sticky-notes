@@ -33,6 +33,12 @@
   const fieldsList = document.getElementById("fieldsList");
   const fieldsPresets = document.getElementById("fieldsPresets");
   const addFieldBtn = document.getElementById("addFieldBtn");
+  const identityBtn = document.getElementById("identityBtn");
+  const identityPopover = document.getElementById("identityPopover");
+  const identityNameInput = document.getElementById("identityNameInput");
+  const identityInitialsInput = document.getElementById("identityInitialsInput");
+  const identityColorRow = document.getElementById("identityColorRow");
+  const presenceRow = document.getElementById("presenceRow");
 
   const WORLD_W = 3000;
   const WORLD_H = 2000;
@@ -154,6 +160,189 @@
     // Avoids crypto.randomUUID for wider WebKit/webview compatibility.
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
   }
+
+  // ---------- Local identity (name, initials, color) ----------
+  // Still no accounts (see README) -- this is a per-browser display
+  // identity, entirely client-chosen and unauthenticated: no password, no
+  // server-side verification, just whatever this client claims. It's what
+  // lets peers tell each other apart (live cursor labels, a presence row of
+  // who's currently on the board) and what a "Person" custom field's
+  // dropdown is built from. Persisted in localStorage so it survives
+  // reloads, and broadcast to the board's Durable Object -- which keeps a
+  // roster of everyone who's ever used it -- whenever it's set or changed.
+  const IDENTITY_KEY = "sticky-notes:identity";
+  const USER_ID_KEY = "sticky-notes:userId";
+
+  function loadOrCreateUserId() {
+    try {
+      let id = localStorage.getItem(USER_ID_KEY);
+      if (!id) {
+        id = makeId();
+        localStorage.setItem(USER_ID_KEY, id);
+      }
+      return id;
+    } catch (err) {
+      return makeId(); // storage unavailable (private mode, etc.) -- session-only id
+    }
+  }
+
+  function initialsFrom(name) {
+    const words = name.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return "?";
+    if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+    return (words[0][0] + words[1][0]).toUpperCase();
+  }
+
+  function loadIdentity() {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(IDENTITY_KEY) || "null");
+    } catch (err) { /* malformed or unavailable storage -- fall back to defaults */ }
+    const color =
+      saved && typeof saved.color === "string" && CURSOR_COLORS.includes(saved.color)
+        ? saved.color
+        : CURSOR_COLORS[Math.floor(Math.random() * CURSOR_COLORS.length)];
+    const name = saved && typeof saved.name === "string" ? saved.name.trim().slice(0, 24) : "";
+    const initials =
+      saved && typeof saved.initials === "string" && saved.initials.trim()
+        ? saved.initials.trim().slice(0, 2).toUpperCase()
+        : initialsFrom(name);
+    return { name, initials, color };
+  }
+
+  const myUserId = loadOrCreateUserId();
+  const myIdentity = loadIdentity();
+
+  function saveIdentity() {
+    try {
+      localStorage.setItem(IDENTITY_KEY, JSON.stringify(myIdentity));
+    } catch (err) { /* private mode / storage full -- identity just won't persist */ }
+  }
+
+  // userId -> { name, initials, color }, board-wide; everyone who has ever
+  // opened this board (named themselves or not) ends up in here, since
+  // identity is broadcast once on every connect -- see MP.sendIdentity.
+  const roster = new Map();
+  // connection id -> userId, for whoever's connected *right now* -- drives
+  // the presence row and remote cursor labels. Cleared/rebuilt on
+  // (re)connect, updated live via "identity"/"leave" messages.
+  const onlineConnToUser = new Map();
+
+  function applyRosterEntry(u) {
+    if (!u || typeof u.id !== "string" || !u.id) return;
+    roster.set(u.id, {
+      name: typeof u.name === "string" ? u.name.trim().slice(0, 24) : "",
+      initials:
+        typeof u.initials === "string" && u.initials.trim() ? u.initials.trim().slice(0, 2).toUpperCase() : "?",
+      color: typeof u.color === "string" && CURSOR_COLORS.includes(u.color) ? u.color : CURSOR_COLORS[0],
+    });
+  }
+
+  applyRosterEntry({ id: myUserId, ...myIdentity });
+
+  function renderIdentityButton() {
+    if (!identityBtn) return;
+    identityBtn.textContent = myIdentity.initials;
+    identityBtn.style.background = myIdentity.color;
+    identityBtn.title = myIdentity.name ? `You: ${myIdentity.name} (click to edit)` : "Set your name";
+  }
+
+  function renderPresenceRow() {
+    if (!presenceRow) return;
+    presenceRow.innerHTML = "";
+    const seen = new Set();
+    const addAvatar = (userId) => {
+      if (seen.has(userId)) return;
+      seen.add(userId);
+      const u = roster.get(userId) || { name: "", initials: "?", color: CURSOR_COLORS[0] };
+      const el = document.createElement("span");
+      el.className = "presence-avatar";
+      el.style.background = u.color;
+      el.textContent = u.initials;
+      el.title = u.name || "Anonymous";
+      presenceRow.appendChild(el);
+    };
+    addAvatar(myUserId);
+    for (const userId of onlineConnToUser.values()) addAvatar(userId);
+  }
+
+  function commitIdentity() {
+    saveIdentity();
+    applyRosterEntry({ id: myUserId, ...myIdentity });
+    renderIdentityButton();
+    renderPresenceRow();
+    MP.sendIdentity();
+    renderAllNoteFieldRows();
+    if (fieldsPopoverNoteId) renderNoteFieldsPopoverContent(fieldsPopoverNoteId);
+  }
+
+  function renderIdentityColorRow() {
+    if (!identityColorRow) return;
+    identityColorRow.innerHTML = "";
+    for (const c of CURSOR_COLORS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "identity-color-opt" + (c === myIdentity.color ? " active" : "");
+      btn.style.background = c;
+      btn.addEventListener("click", () => {
+        myIdentity.color = c;
+        commitIdentity();
+        renderIdentityColorRow();
+      });
+      identityColorRow.appendChild(btn);
+    }
+  }
+
+  function openIdentityPopover() {
+    closeMenu();
+    closeColorPopover();
+    closeFormatToolbar();
+    closeNoteFieldsPopover();
+    identityNameInput.value = myIdentity.name;
+    // Leave the initials input blank (showing its "??" placeholder) unless
+    // the current initials were a deliberate override -- otherwise it'd
+    // look pre-filled and the name-change handler below would treat that
+    // as "already customized" and stop auto-deriving from the name.
+    identityInitialsInput.value = myIdentity.initials === initialsFrom(myIdentity.name) ? "" : myIdentity.initials;
+    renderIdentityColorRow();
+    identityPopover.hidden = false;
+    const rect = identityBtn.getBoundingClientRect();
+    identityPopover.style.top = rect.bottom + 6 + "px";
+    identityPopover.style.right = Math.max(4, window.innerWidth - rect.right) + "px";
+  }
+  function closeIdentityPopover() {
+    identityPopover.hidden = true;
+  }
+
+  if (identityBtn) {
+    identityBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      identityPopover.hidden ? openIdentityPopover() : closeIdentityPopover();
+    });
+    document.addEventListener("click", (e) => {
+      if (!identityPopover.hidden && !identityPopover.contains(e.target) && e.target !== identityBtn) {
+        closeIdentityPopover();
+      }
+    });
+    identityNameInput.addEventListener("change", () => {
+      const hadNoInitials = !identityInitialsInput.value.trim();
+      myIdentity.name = identityNameInput.value.trim().slice(0, 24);
+      if (hadNoInitials) {
+        myIdentity.initials = initialsFrom(myIdentity.name);
+        identityInitialsInput.value = myIdentity.initials;
+      }
+      commitIdentity();
+    });
+    identityInitialsInput.addEventListener("change", () => {
+      const v = identityInitialsInput.value.trim().slice(0, 2).toUpperCase();
+      myIdentity.initials = v || initialsFrom(myIdentity.name);
+      identityInitialsInput.value = myIdentity.initials;
+      commitIdentity();
+    });
+  }
+
+  renderIdentityButton();
+  renderPresenceRow();
 
   // A handwriting font still looks too uniform if every note leans the exact
   // same way, so each note gets a small deterministic (hash of its id, so it
@@ -297,6 +486,7 @@
 
   // ---------- Hamburger menu ----------
   function openMenu() {
+    closeIdentityPopover();
     menuDrawer.classList.add("open");
     menuBackdrop.classList.add("open");
   }
@@ -595,6 +785,7 @@
     if (!colorPopover.hidden && colorTargetId === id) { closeColorPopover(); return; }
     closeFormatToolbar();
     closeNoteFieldsPopover();
+    closeIdentityPopover();
     colorTargetId = id;
     positionPopoverNear(colorPopover, id);
   }
@@ -737,6 +928,7 @@
     if (!formatToolbar.hidden && formatTargetId === id) { closeFormatToolbar(); return; }
     closeColorPopover();
     closeNoteFieldsPopover();
+    closeIdentityPopover();
     formatTargetId = id;
     positionPopoverNear(formatToolbar, id);
     const editor = formatEditor();
@@ -761,11 +953,14 @@
   // state, synced like notes but stored under a separate server-side key so
   // "Clear Board" (which only wipes notes) leaves the schema intact.
   //
-  // There are no user accounts in this app (see README), so "assignee" isn't
-  // a real identity -- it's just a field, typically a select whose options
-  // are the names of whoever uses the board, or a free-text field. That's
-  // deliberate: the metadata system is generic, and assignee/status are one
-  // instance of it rather than special-cased.
+  // There are still no accounts in this app (see README), but a "Person"
+  // field lets one of the other deliberately generic types -- select --
+  // specialize: instead of the board author typing out everyone's name as
+  // manual options, its choices are whoever's local identity (see "Local
+  // identity" above) has ever touched this board, kept in `roster`. A
+  // value is a user id, resolved against `roster` at render time rather
+  // than a name/color baked in when it was set, so renaming yourself
+  // updates every note you're assigned to.
   const FIELD_TYPES = [
     { id: "text", label: "Text" },
     { id: "number", label: "Number" },
@@ -773,6 +968,7 @@
     { id: "date", label: "Date" },
     { id: "select", label: "Single select" },
     { id: "multiselect", label: "Multi-select (tags)" },
+    { id: "user", label: "Person" },
   ];
   const FIELD_TYPE_IDS = new Set(FIELD_TYPES.map((t) => t.id));
   const FIELD_TYPES_WITH_OPTIONS = new Set(["select", "multiselect"]);
@@ -794,7 +990,7 @@
         { label: "Done", color: "#a5d6a7" },
       ],
     },
-    { name: "Assignee", type: "text", options: [] },
+    { name: "Assignee", type: "user", options: [] },
     {
       name: "Priority",
       type: "select",
@@ -874,6 +1070,19 @@
     return chip;
   }
 
+  function makeUserChip(userId) {
+    const u = roster.get(userId);
+    const chip = document.createElement("span");
+    chip.className = "field-chip user-chip";
+    const dot = document.createElement("span");
+    dot.className = "user-chip-avatar";
+    dot.style.background = (u && u.color) || "#888";
+    dot.textContent = (u && u.initials) || "?";
+    chip.appendChild(dot);
+    chip.appendChild(document.createTextNode((u && u.name) || "Unknown"));
+    return chip;
+  }
+
   function renderNoteFieldRow(id) {
     const note = notes.get(id);
     const refs = noteEls.get(id);
@@ -902,6 +1111,10 @@
           any = true;
           row.appendChild(makeFieldChip(opt.label, opt.color));
         }
+      } else if (field.type === "user") {
+        if (!value) continue;
+        any = true;
+        row.appendChild(makeUserChip(value));
       } else {
         // text, number, date
         if (value === undefined || value === null || value === "") continue;
@@ -926,6 +1139,7 @@
     if (!noteFieldsPopover.hidden && fieldsPopoverNoteId === id) { closeNoteFieldsPopover(); return; }
     closeColorPopover();
     closeFormatToolbar();
+    closeIdentityPopover();
     fieldsPopoverNoteId = id;
     renderNoteFieldsPopoverContent(id);
     positionPopoverNear(noteFieldsPopover, id);
@@ -1026,6 +1240,35 @@
           wrap.appendChild(optBtn);
         }
         row.appendChild(wrap);
+      } else if (field.type === "user") {
+        const select = document.createElement("select");
+        const blank = document.createElement("option");
+        blank.value = "";
+        blank.textContent = "— Unassigned —";
+        select.appendChild(blank);
+        const currentValue = values[field.id];
+        let currentInRoster = false;
+        const entries = [...roster.entries()].sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
+        for (const [userId, u] of entries) {
+          if (userId === currentValue) currentInRoster = true;
+          const o = document.createElement("option");
+          o.value = userId;
+          o.textContent = (u.name || "Anonymous") + (userId === myUserId ? " (you)" : "");
+          if (currentValue === userId) o.selected = true;
+          select.appendChild(o);
+        }
+        // A value can outlive its roster entry only if this board's roster
+        // was somehow cleared server-side -- keep it selectable rather than
+        // silently discarding whoever it pointed to.
+        if (currentValue && !currentInRoster) {
+          const o = document.createElement("option");
+          o.value = currentValue;
+          o.textContent = "Unknown user";
+          o.selected = true;
+          select.appendChild(o);
+        }
+        select.addEventListener("change", () => setNoteFieldValue(id, field.id, select.value));
+        row.appendChild(select);
       }
       noteFieldsPopover.appendChild(row);
     }
@@ -1516,7 +1759,6 @@
 
   // ---------- Multiplayer (Cloudflare Worker + Durable Objects) ----------
   const myPointer = { x: -1, y: -1, active: false };
-  const myColor = CURSOR_COLORS[Math.floor(Math.random() * CURSOR_COLORS.length)];
 
   const MP = (() => {
     let ws = null;
@@ -1594,11 +1836,14 @@
       ws.onopen = () => {
         reconnectDelay = 1000;
         setConnDot("connected");
+        sendIdentity();
       };
       ws.onclose = () => {
         setConnDot("disconnected");
         setTimeout(connect, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 1.6, 15000);
+        onlineConnToUser.clear();
+        renderPresenceRow();
       };
       ws.onerror = () => {
         try { ws.close(); } catch (err) { /* already closing */ }
@@ -1614,6 +1859,13 @@
       switch (msg.t) {
         case "history":
           applyRemoteFieldDefs(msg.fields);
+          for (const u of msg.users || []) applyRosterEntry(u);
+          onlineConnToUser.clear();
+          for (const u of msg.online || []) {
+            applyRosterEntry(u);
+            if (u && u.connId) onlineConnToUser.set(u.connId, u.id);
+          }
+          renderPresenceRow();
           for (const note of msg.notes) {
             try {
               addNoteLocally(note);
@@ -1638,11 +1890,21 @@
         case "fields":
           applyRemoteFieldDefs(msg.fields);
           break;
+        case "identity":
+          applyRosterEntry(msg);
+          onlineConnToUser.set(msg.from, msg.id);
+          renderPresenceRow();
+          renderAllNoteFieldRows();
+          if (fieldsPopoverNoteId) renderNoteFieldsPopoverContent(fieldsPopoverNoteId);
+          refreshRemoteCursorLabel(msg.from);
+          break;
         case "cursor":
           updateRemoteCursor(msg);
           break;
         case "leave":
           removeRemoteCursor(msg.from);
+          onlineConnToUser.delete(msg.from);
+          renderPresenceRow();
           break;
         default:
           break;
@@ -1654,6 +1916,7 @@
       if (!el) {
         el = document.createElement("div");
         el.className = "remote-cursor";
+        el.appendChild(document.createElement("span")).className = "remote-cursor-label";
         cursorsEl.appendChild(el);
         remoteCursorEls.set(msg.from, el);
       }
@@ -1662,6 +1925,21 @@
       el.style.borderColor = msg.color || "#fff";
       el.style.background = msg.color || "#fff";
       remoteLastSeen.set(msg.from, performance.now());
+      refreshRemoteCursorLabel(msg.from);
+    }
+
+    // A cursor's label needs whichever identity is currently mapped to its
+    // connection id, which can arrive after the cursor itself (join order
+    // isn't guaranteed) -- so this is called both when a cursor moves and
+    // when an "identity" message resolves a connection to a user.
+    function refreshRemoteCursorLabel(connId) {
+      const el = remoteCursorEls.get(connId);
+      if (!el) return;
+      const label = el.querySelector(".remote-cursor-label");
+      if (!label) return;
+      const userId = onlineConnToUser.get(connId);
+      const u = userId && roster.get(userId);
+      label.textContent = u && u.name ? u.name : "";
     }
 
     function removeRemoteCursor(from) {
@@ -1684,10 +1962,14 @@
 
     function tick(now) {
       if (myPointer.active && now - lastCursorSent > 66) {
-        send({ t: "cursor", x: Math.round(myPointer.x), y: Math.round(myPointer.y), color: myColor });
+        send({ t: "cursor", x: Math.round(myPointer.x), y: Math.round(myPointer.y), color: myIdentity.color });
         lastCursorSent = now;
       }
       sweepStaleCursors();
+    }
+
+    function sendIdentity() {
+      send({ t: "identity", id: myUserId, name: myIdentity.name, initials: myIdentity.initials, color: myIdentity.color });
     }
 
     function init() {
@@ -1706,6 +1988,7 @@
       sendDelete: (id) => send({ t: "delete", id }),
       sendClear: () => send({ t: "clear" }),
       sendFields: (fields) => send({ t: "fields", fields }),
+      sendIdentity,
     };
   })();
 

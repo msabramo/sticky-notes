@@ -56,20 +56,30 @@ same coordinate space, so notes always line up between devices.
   note's header for bold/italic/underline, headings, a font picker
   (a real list of named fonts, not just five presets), and font size.
   With nothing selected, a change applies to the whole note.
+- **Your name** — tap the small circle next to ☰ to set your display name,
+  two-letter initials, and a color. It's not an account (see Known
+  limitations) — no password, no server-side verification, just a
+  per-browser identity (saved in `localStorage`) that lets everyone else on
+  the board tell who's who: it labels your live cursor, shows up in the
+  presence row of avatars next to the ☰ button for everyone currently on
+  the board, and is what a **Person** custom field (below) offers as its
+  choices. Leave it unset and you're just "Anonymous" with a random color —
+  still visible to others, just not named.
 - **Custom fields** — tap the 🏷 button in a note's header to set values for
   whatever metadata fields the board defines (e.g. Status, Assignee,
   Priority, Tags, Due date), shown as small colored chips on the note.
   Define the fields themselves from the hamburger menu → **Manage Fields**:
   add a field, name it, and pick a type — text, number, checkbox, date,
-  single-select, or multi-select (tags) — with a few one-tap presets to get
-  started. Select/multi-select fields have their own colored options (e.g.
-  "To do / In progress / Done" for Status), so a board can be run as a
-  lightweight kanban-style todo list. There are no accounts in this app (see
-  Known limitations), so "Assignee" isn't tied to a real identity — it's
-  just a field like any other, typically free text or a select whose
-  options are the names of whoever uses the board. Field definitions are
-  shared board-wide state, just like the notes; clearing the board wipes
-  notes but leaves the field definitions in place.
+  single-select, multi-select (tags), or person — with a few one-tap
+  presets to get started. Select/multi-select fields have their own colored
+  options (e.g. "To do / In progress / Done" for Status), so a board can be
+  run as a lightweight kanban-style todo list. A **person** field (e.g.
+  "Assignee") is a select whose options aren't typed in by hand — its
+  dropdown auto-fills with everyone who's set a name/color on this board
+  (see "Your name" above), so assigning a note to someone is picking them
+  from a list rather than retyping their name. Field definitions are shared
+  board-wide state, just like the notes; clearing the board wipes notes but
+  leaves the field definitions (and everyone's names) in place.
 - **Delete** — tap the × button in a note's header.
 - **Photo to notes** — tap 📷 (bottom-left, above **+**) to snap or pick a
   photo of a handwritten or printed to-do list; each item it finds
@@ -81,11 +91,12 @@ same coordinate space, so notes always line up between devices.
 - **Zoom** — pinch, scroll, or the +/− buttons; the ⤢ button fits
   everything on screen.
 
-Not in this pass: images/attachments, connectors between notes, and
-per-user identity (cursors are just colored blobs, chosen randomly per
-session) — natural next additions rather than being folded in here. (A
-board-wide custom-fields system covers todo-style status/assignee/tags
-without needing real accounts — see Custom fields above.)
+Not in this pass: images/attachments and connectors between notes — natural
+next additions rather than being folded in here. (Per-browser identity —
+name, initials, color, live cursor labels, a presence row, and a Person
+custom field built on top of it — is covered above under "Your name" and
+"Custom fields"; a board-wide custom-fields system covers todo-style
+status/tags the same way, without needing real accounts.)
 
 ## Backend: Cloudflare Workers + Durable Objects
 
@@ -102,6 +113,16 @@ note content), while the board's custom-field *definitions* — the schema
 those values are validated against client-side — are stored under a
 separate key so "Clear Board" (which only wipes notes) leaves them
 intact, and are sent to a new connection alongside note history.
+
+A client's chosen name/initials/color (see "Your name" above) is broadcast
+once per connection and again on every edit, stored under its own key so
+the board accumulates a roster of everyone who's ever used it — that
+roster is what a Person custom field's dropdown is built from. It's kept
+separate from *who's currently connected*: each live connection also
+tracks the identity it last announced, so a new connection's history
+message can report both the all-time roster and who's online right now.
+None of this is authentication — a client can claim any name it likes, the
+same way it can send any note content it likes.
 
 This runs on Cloudflare's **Workers Free plan** — Durable Objects
 (SQLite-backed) are included at no cost, no credit card required, with
@@ -172,6 +193,9 @@ automatically, no `wrangler secret put` needed for local runs).
 ## Known limitations
 
 - No accounts, no moderation — anyone with the link can edit the board.
+  Names/initials/colors (see "Your name" above) are entirely
+  self-reported and unverified, same as everything else on a board — a
+  display convenience, not an identity anyone else can trust.
 - No per-user undo; deletes and clears are immediate and shared.
 - Concurrent edits to the *same* note's text are last-write-wins (a rare
   collision for a hobby tool, not worth more machinery here).
