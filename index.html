@@ -22,7 +22,7 @@
       <button id="menuBtn" class="menu-btn" title="Menu" aria-label="Menu">☰</button>
     </header>
 
-    <main class="board-wrap" id="boardWrap">
+    <main class="board-wrap bg-grid" id="boardWrap">
       <div class="world" id="world">
         <div class="cursors" id="cursors"></div>
       </div>
@@ -107,6 +107,24 @@
     <div class="menu-section">
       <span class="room-label">Board <b id="boardCode">------</b></span>
       <button id="copyLinkBtn" class="btn">🔗 Copy Invite Link</button>
+    </div>
+    <div class="menu-divider"></div>
+    <div class="menu-section">
+      <span class="menu-section-label">Background</span>
+      <div class="bg-swatches" id="bgSwatches">
+        <button type="button" class="bg-swatch" data-bg="grid" title="Grid">
+          <span class="bg-swatch-preview bg-preview-grid"></span>Grid
+        </button>
+        <button type="button" class="bg-swatch" data-bg="whiteboard" title="Whiteboard">
+          <span class="bg-swatch-preview bg-preview-whiteboard"></span>Whiteboard
+        </button>
+        <button type="button" class="bg-swatch" data-bg="chalkboard" title="Chalkboard">
+          <span class="bg-swatch-preview bg-preview-chalkboard"></span>Chalkboard
+        </button>
+        <button type="button" class="bg-swatch" data-bg="pinboard" title="Pinboard">
+          <span class="bg-swatch-preview bg-preview-pinboard"></span>Pinboard
+        </button>
+      </div>
     </div>
     <div class="menu-divider"></div>
     <div class="menu-section actions">

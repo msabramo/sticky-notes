@@ -50,6 +50,7 @@
   const identityInitialsInput = document.getElementById("identityInitialsInput");
   const identityColorRow = document.getElementById("identityColorRow");
   const presenceRow = document.getElementById("presenceRow");
+  const bgSwatches = document.getElementById("bgSwatches");
 
   const WORLD_W = 3000;
   const WORLD_H = 2000;
@@ -597,6 +598,43 @@
     MP.sendClear();
     closeMenu();
   });
+
+  // ---------- Board background ----------
+  // Like the custom fields schema, the chosen background is board-wide state
+  // synced to every peer (see MP.sendBackground / the "background" message)
+  // rather than a per-viewer preference, so everyone sees the same board.
+  const BOARD_BACKGROUNDS = ["grid", "whiteboard", "chalkboard", "pinboard"];
+  let boardBackground = "grid";
+
+  function normalizeBackground(bg) {
+    return BOARD_BACKGROUNDS.includes(bg) ? bg : "grid";
+  }
+
+  function applyBoardBackground(bg) {
+    boardBackground = normalizeBackground(bg);
+    boardWrap.classList.remove(...BOARD_BACKGROUNDS.map((b) => "bg-" + b));
+    boardWrap.classList.add("bg-" + boardBackground);
+    if (bgSwatches) {
+      for (const btn of bgSwatches.querySelectorAll(".bg-swatch")) {
+        btn.classList.toggle("active", btn.dataset.bg === boardBackground);
+      }
+    }
+  }
+
+  function applyRemoteBackground(bg) {
+    applyBoardBackground(bg);
+  }
+
+  if (bgSwatches) {
+    bgSwatches.addEventListener("click", (e) => {
+      const btn = e.target.closest(".bg-swatch");
+      if (!btn) return;
+      applyBoardBackground(btn.dataset.bg);
+      MP.sendBackground(boardBackground);
+    });
+  }
+
+  applyBoardBackground(boardBackground);
 
   // ---------- Notes state ----------
   const notes = new Map(); // id -> {id,x,y,w,h,color,html,rot,z}
@@ -2448,6 +2486,7 @@
       switch (msg.t) {
         case "history":
           applyRemoteFieldDefs(msg.fields);
+          applyRemoteBackground(msg.background);
           for (const u of msg.users || []) applyRosterEntry(u);
           onlineConnToUser.clear();
           for (const u of msg.online || []) {
@@ -2496,6 +2535,9 @@
           renderAllNoteFieldRows();
           if (fieldsPopoverNoteId) renderNoteFieldsPopoverContent(fieldsPopoverNoteId);
           refreshRemoteCursorLabel(msg.from);
+          break;
+        case "background":
+          applyRemoteBackground(msg.background);
           break;
         case "cursor":
           updateRemoteCursor(msg);
@@ -2588,6 +2630,7 @@
       sendClear: () => send({ t: "clear" }),
       sendFields: (fields) => send({ t: "fields", fields }),
       sendIdentity,
+      sendBackground: (background) => send({ t: "background", background }),
     };
   })();
 

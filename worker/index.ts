@@ -33,7 +33,7 @@ import { DurableObject } from "cloudflare:workers";
  *     field). Stored separately from notes so "clear" (which only wipes
  *     notes) leaves field definitions in place. A new connection receives
  *     the current schema alongside note history: { t: "history", notes,
- *     fields, users, online }.
+ *     fields, users, online, background }.
  *   identity: { t: "identity", id, name, initials, color } -- a per-browser
  *     display identity (see script.js), not an account: no password, no
  *     server-side verification, just whatever the sending client claims.
@@ -48,6 +48,10 @@ import { DurableObject } from "cloudflare:workers";
  *     (`online`, each entry carrying the sending connection's id as
  *     `connId` so peers can map it to "leave" events) as opposed to merely
  *     who has ever visited.
+ *   background: { t: "background", background }  -- sets the board's
+ *     background type (a string id like "grid"/"whiteboard"/"chalkboard"/
+ *     "pinboard", opaque to the server). Stored like `fields`, separately
+ *     from notes, and included in the history payload as `background`.
  *
  * POST /board/<board-id>/vision is a separate, non-websocket endpoint: send
  * { image: "data:image/...;base64,..." } and get back { items: string[] }
@@ -67,6 +71,7 @@ interface Env {
 const NOTE_PREFIX = "note:";
 const USER_PREFIX = "user:";
 const FIELDS_KEY = "schema:fields";
+const BACKGROUND_KEY = "schema:background";
 const MAX_NOTES = 2000;
 const MAX_USERS = 500;
 const VISION_DAILY_LIMIT = 30;
@@ -168,7 +173,10 @@ export class NotesBoard extends DurableObject<Env> {
         return att && att.identity ? { ...att.identity, connId: att.id } : null;
       })
       .filter(Boolean);
-    server.send(JSON.stringify({ t: "history", notes, fields: fields || [], users, online }));
+    const background = (await this.ctx.storage.get(BACKGROUND_KEY)) as string | undefined;
+    server.send(
+      JSON.stringify({ t: "history", notes, fields: fields || [], users, online, background: background || "grid" })
+    );
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -270,6 +278,12 @@ export class NotesBoard extends DurableObject<Env> {
         if (known || (await this.ctx.storage.list({ prefix: USER_PREFIX })).size < MAX_USERS) {
           await this.ctx.storage.put(USER_PREFIX + userId, data as Identity);
         }
+        this.broadcast(out, senderId);
+        break;
+      }
+      case "background": {
+        const background = typeof data.background === "string" ? data.background : "grid";
+        await this.ctx.storage.put(BACKGROUND_KEY, background);
         this.broadcast(out, senderId);
         break;
       }

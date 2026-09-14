@@ -114,6 +114,10 @@ same coordinate space, so notes always line up between devices.
   definitions are shared board-wide state, just like the notes; clearing
   the board wipes notes but leaves the field definitions (and everyone's
   names) in place.
+- **Background** — from the hamburger menu, pick the board's background:
+  Grid (the default dotted-grid look), Whiteboard, Chalkboard, or Pinboard
+  (a linen/cork texture). It's shared board-wide state, just like the
+  custom fields — everyone viewing the board sees the same one.
 - **Delete** — tap the × button in a note's header.
 - **Photo to notes** — tap 📷 (bottom-left, above **+**) to snap or pick a
   photo of a handwritten or printed to-do list; each item it finds
