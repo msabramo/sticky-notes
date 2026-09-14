@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap" />
-  <link rel="stylesheet" href="style.css?v=5" />
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
   <div class="app">
@@ -28,6 +28,7 @@
       <button class="fab" id="addNoteBtn" title="Add a sticky note">+</button>
       <button class="fab fab-secondary" id="scanBtn" title="Turn a photo of a to-do list into sticky notes">📷</button>
       <input type="file" accept="image/*" capture="environment" id="photoInput" hidden />
+      <input type="file" accept="image/*" id="noteImageInput" hidden />
 
       <div class="zoom-controls no-print">
         <button id="zoomInBtn" class="zoom-btn" title="Zoom in">+</button>
@@ -65,6 +66,13 @@
           <select class="format-select format-select-wide" id="fmtFontSelect" title="Font"></select>
           <select class="format-select" id="fmtSizeSelect" title="Size"></select>
         </div>
+        <div class="format-row">
+          <input type="color" class="format-color" id="fmtColorInput" title="Text color" value="#c62828" />
+          <button type="button" class="format-btn" id="fmtBulletBtn" title="Bullet list">•</button>
+          <button type="button" class="format-btn" id="fmtNumberBtn" title="Numbered list">1.</button>
+          <button type="button" class="format-btn" id="fmtLinkBtn" title="Turn selected text into a link">🔗</button>
+          <button type="button" class="format-btn" id="fmtImageBtn" title="Insert an image">🖼</button>
+        </div>
       </div>
     </main>
   </div>
@@ -82,7 +90,7 @@
       <a href="?" id="newBoardLink" class="btn">✨ Start a New Board</a>
     </div>
     <div class="menu-divider"></div>
-    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, and size — select some text first to format just that part. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields). Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
+    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, size, text color, bullet/numbered lists, links, and images — select some text first to format just that part or to turn it into a link; with nothing selected, an inserted image drops in at your cursor. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields). Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
   </aside>
 
   <div class="fields-modal-backdrop no-print" id="fieldsModalBackdrop"></div>
@@ -98,6 +106,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=5"></script>
+  <script src="script.js?v=6"></script>
 </body>
 </html>

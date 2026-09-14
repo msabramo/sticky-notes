@@ -220,6 +220,22 @@ body {
 .note-text h1 { font-size: 1.5em; }
 .note-text h2 { font-size: 1.25em; }
 .note-text h3 { font-size: 1.05em; }
+.note-text ul, .note-text ol {
+  margin: 2px 0;
+  padding-left: 1.3em;
+}
+.note-text li { margin: 1px 0; }
+.note-text a {
+  color: #1a54b8;
+  text-decoration: underline;
+}
+.note-text img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 4px 0;
+}
 
 .note.selected {
   outline: 2px solid rgba(255, 255, 255, 0.6);
@@ -345,6 +361,17 @@ body {
   padding: 0 4px;
 }
 .format-select-wide { flex: 2; }
+
+.format-color {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  padding: 2px;
+  cursor: pointer;
+}
 
 /* ---------- Note fields (custom metadata) ---------- */
 .note-fields-row {

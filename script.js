@@ -25,6 +25,12 @@
   const fmtHeadingSelect = document.getElementById("fmtHeadingSelect");
   const fmtFontSelect = document.getElementById("fmtFontSelect");
   const fmtSizeSelect = document.getElementById("fmtSizeSelect");
+  const fmtColorInput = document.getElementById("fmtColorInput");
+  const fmtBulletBtn = document.getElementById("fmtBulletBtn");
+  const fmtNumberBtn = document.getElementById("fmtNumberBtn");
+  const fmtLinkBtn = document.getElementById("fmtLinkBtn");
+  const fmtImageBtn = document.getElementById("fmtImageBtn");
+  const noteImageInput = document.getElementById("noteImageInput");
   const noteFieldsPopover = document.getElementById("noteFieldsPopover");
   const manageFieldsBtn = document.getElementById("manageFieldsBtn");
   const fieldsModalBackdrop = document.getElementById("fieldsModalBackdrop");
@@ -77,12 +83,20 @@
   // validate anything -- so any HTML from a remote peer (or from a board's
   // stored history) must be sanitized before it's ever assigned to innerHTML,
   // otherwise one malicious peer could run script in every other viewer's tab.
-  const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "SPAN", "BR", "DIV", "H1", "H2", "H3", "P"]);
-  const DROP_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "IMG", "SVG", "TEMPLATE"]);
+  const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "SPAN", "BR", "DIV", "H1", "H2", "H3", "P", "A", "IMG", "UL", "OL", "LI"]);
+  const DROP_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "SVG", "TEMPLATE"]);
   const FONT_SIZE_RE = /^(1[0-9]|[2-9][0-9]|1[0-4][0-9])px$/;
   const FONT_WEIGHT_RE = /^(bold|normal|[1-9]00)$/;
   const FONT_STYLE_RE = /^(italic|normal)$/;
   const TEXT_DECORATION_RE = /^(underline|none)$/;
+  const COLOR_RE = /^(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\))$/;
+  // Only http(s)/mailto links: anything else (javascript:, data:, etc.) could
+  // run script or otherwise misbehave when clicked.
+  const SAFE_HREF_RE = /^(https?:|mailto:)\S+$/i;
+  // Images may only be same-document data: URIs, never a remote src -- an
+  // <img src="https://..."> would silently phone home to a third party (and
+  // leak the viewer's IP) the instant anyone merely opens the board.
+  const SAFE_IMG_SRC_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
 
   function sanitizeStyle(styleText) {
     const out = [];
@@ -96,8 +110,28 @@
       else if (prop === "font-weight" && FONT_WEIGHT_RE.test(value)) out.push(`font-weight:${value}`);
       else if (prop === "font-style" && FONT_STYLE_RE.test(value)) out.push(`font-style:${value}`);
       else if (prop === "text-decoration" && TEXT_DECORATION_RE.test(value)) out.push(`text-decoration:${value}`);
+      else if (prop === "color" && COLOR_RE.test(value)) out.push(`color:${value}`);
     }
     return out.join(";");
+  }
+
+  function sanitizeStyledElement(node) {
+    const styleAttr = node.getAttribute("style");
+    for (const attr of [...node.attributes]) node.removeAttribute(attr.name);
+    if (styleAttr) {
+      const clean = sanitizeStyle(styleAttr);
+      if (clean) node.setAttribute("style", clean);
+    }
+  }
+
+  // Drops a wrapper element but keeps its (already-sanitized) children --
+  // used for tags this app doesn't allow, and for an <a>/<img> whose only
+  // attribute (href/src) failed validation, so the link/image disappears but
+  // the surrounding text a peer typed doesn't.
+  function unwrapElement(parent, node) {
+    sanitizeWalk(node);
+    while (node.firstChild) parent.insertBefore(node.firstChild, node);
+    parent.removeChild(node);
   }
 
   function sanitizeWalk(parent) {
@@ -109,16 +143,33 @@
         if (DROP_TAGS.has(tag)) {
           node.remove();
         } else if (!ALLOWED_TAGS.has(tag)) {
-          sanitizeWalk(node);
-          while (node.firstChild) parent.insertBefore(node.firstChild, node);
-          parent.removeChild(node);
-        } else {
-          const styleAttr = node.getAttribute("style");
-          for (const attr of [...node.attributes]) node.removeAttribute(attr.name);
-          if (styleAttr) {
-            const clean = sanitizeStyle(styleAttr);
-            if (clean) node.setAttribute("style", clean);
+          unwrapElement(parent, node);
+        } else if (tag === "A") {
+          const href = (node.getAttribute("href") || "").trim();
+          if (SAFE_HREF_RE.test(href)) {
+            sanitizeStyledElement(node);
+            node.setAttribute("href", href);
+            // Always force these, regardless of what a peer's HTML carried --
+            // contenteditable links only need to *look* like links; actually
+            // following one should never happen without the safety of a new,
+            // unprivileged tab.
+            node.setAttribute("target", "_blank");
+            node.setAttribute("rel", "noopener noreferrer");
+            sanitizeWalk(node);
+          } else {
+            unwrapElement(parent, node);
           }
+        } else if (tag === "IMG") {
+          const src = (node.getAttribute("src") || "").trim();
+          if (SAFE_IMG_SRC_RE.test(src)) {
+            for (const attr of [...node.attributes]) node.removeAttribute(attr.name);
+            node.setAttribute("src", src);
+            node.setAttribute("alt", "");
+          } else {
+            node.remove();
+          }
+        } else {
+          sanitizeStyledElement(node);
           sanitizeWalk(node);
         }
       } else if (node.nodeType !== Node.TEXT_NODE) {
@@ -671,6 +722,8 @@
     fmtBoldBtn.classList.toggle("active", document.queryCommandState("bold"));
     fmtItalicBtn.classList.toggle("active", document.queryCommandState("italic"));
     fmtUnderlineBtn.classList.toggle("active", document.queryCommandState("underline"));
+    fmtBulletBtn.classList.toggle("active", document.queryCommandState("insertUnorderedList"));
+    fmtNumberBtn.classList.toggle("active", document.queryCommandState("insertOrderedList"));
     const block = document.queryCommandValue("formatBlock").toUpperCase();
     fmtHeadingSelect.value = block === "H2" || block === "H3" ? block : "P";
   }
@@ -716,12 +769,34 @@
     reselectSpans(spans);
   }
 
+  function applyTextColor(editor, hex) {
+    document.execCommand("foreColor", false, hex);
+    // Firefox emits <font color>; Chrome/Safari apply the style directly to a
+    // <span> already, so only the <font> case needs normalizing to match the
+    // sanitizer's allowlist (which only accepts `color` as a span style).
+    const spans = [];
+    editor.querySelectorAll("font[color]").forEach((f) => {
+      const span = document.createElement("span");
+      span.style.color = hex;
+      while (f.firstChild) span.appendChild(f.firstChild);
+      f.replaceWith(span);
+      spans.push(span);
+    });
+    reselectSpans(spans);
+  }
+
   fmtBoldBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtItalicBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtUnderlineBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtBulletBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtNumberBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtLinkBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  fmtImageBtn.addEventListener("mousedown", (e) => e.preventDefault());
   fmtBoldBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("bold")));
   fmtItalicBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("italic")));
   fmtUnderlineBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("underline")));
+  fmtBulletBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("insertUnorderedList")));
+  fmtNumberBtn.addEventListener("click", () => withEditorSelection(() => document.execCommand("insertOrderedList")));
   fmtHeadingSelect.addEventListener("change", () => {
     const tag = fmtHeadingSelect.value === "P" ? "DIV" : fmtHeadingSelect.value;
     withEditorSelection(() => document.execCommand("formatBlock", false, `<${tag}>`));
@@ -731,6 +806,123 @@
   });
   fmtSizeSelect.addEventListener("change", () => {
     withEditorSelection((editor) => applyFontSize(editor, Number(fmtSizeSelect.value)));
+  });
+  fmtColorInput.addEventListener("change", () => {
+    withEditorSelection((editor) => applyTextColor(editor, fmtColorInput.value));
+  });
+
+  // ---------- Links ----------
+  // Only turns an existing selection into a link -- matches the toolbar's
+  // "select some text first" pattern used everywhere else, and sidesteps the
+  // extra UI a "no selection" insert-URL-as-text flow would need.
+  fmtLinkBtn.addEventListener("click", () => {
+    const editor = formatEditor();
+    if (!editor) return;
+    editor.focus();
+    ensureEditableSelection(formatTargetId, editor);
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.getRangeAt(0).collapsed) {
+      alert("Select some text first, then tap the link button to turn it into a hyperlink.");
+      return;
+    }
+    const url = prompt("Link URL:", "https://");
+    if (url === null) return;
+    const trimmed = url.trim();
+    if (!SAFE_HREF_RE.test(trimmed)) {
+      alert("Links must start with http://, https://, or mailto:.");
+      return;
+    }
+    withEditorSelection((ed) => {
+      document.execCommand("createLink", false, trimmed);
+      ed.querySelectorAll("a[href]").forEach((a) => {
+        if (a.getAttribute("href") !== trimmed) return;
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener noreferrer");
+      });
+    });
+  });
+
+  // ---------- Images ----------
+  // Images are embedded inline as data: URIs (never a remote src -- see the
+  // sanitizer) so they work the same for every peer with no server-side
+  // storage or upload endpoint of their own. Downscaled/recompressed
+  // client-side (same approach as the photo-scan feature) to keep a note's
+  // HTML, which is re-sent in full on every edit and capped by the
+  // WebSocket/Durable-Object message size, from ballooning.
+  const MAX_NOTE_IMAGE_DATA_URL_LEN = 700_000; // ~700KB of base64 text
+  let imageTargetId = null;
+  let imageInsertRange = null;
+
+  fmtImageBtn.addEventListener("click", () => {
+    const editor = formatEditor();
+    if (!editor) return;
+    imageTargetId = formatTargetId;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && editor.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      imageInsertRange = sel.getRangeAt(0).cloneRange();
+    } else {
+      const r = document.createRange();
+      r.selectNodeContents(editor);
+      r.collapse(false);
+      imageInsertRange = r;
+    }
+    noteImageInput.value = ""; // allow re-selecting the same file twice in a row
+    noteImageInput.click();
+  });
+
+  async function pickCompressedImageDataUrl(file) {
+    let dataUrl = await downscaleImageToDataUrl(file, 1000, 0.72);
+    if (dataUrl.length > MAX_NOTE_IMAGE_DATA_URL_LEN) {
+      dataUrl = await downscaleImageToDataUrl(file, 700, 0.55);
+    }
+    return dataUrl;
+  }
+
+  function insertImageIntoNote(id, dataUrl) {
+    const refs = noteEls.get(id);
+    if (!refs) return;
+    const editor = refs.editor;
+    const range = imageInsertRange && editor.contains(imageInsertRange.startContainer) ? imageInsertRange : null;
+    const target = range || (() => {
+      const r = document.createRange();
+      r.selectNodeContents(editor);
+      r.collapse(false);
+      return r;
+    })();
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    target.deleteContents();
+    target.insertNode(img);
+    target.setStartAfter(img);
+    target.collapse(true);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(target);
+    editor.focus();
+    if (editor.innerHTML === "<br>") editor.innerHTML = "";
+    scheduleAutofit(id);
+    sendHtmlUpdate(id);
+  }
+
+  noteImageInput.addEventListener("change", async () => {
+    const file = noteImageInput.files && noteImageInput.files[0];
+    const id = imageTargetId;
+    imageTargetId = null;
+    if (!file || !id) return;
+    fmtImageBtn.disabled = true;
+    try {
+      const dataUrl = await pickCompressedImageDataUrl(file);
+      if (dataUrl.length > MAX_NOTE_IMAGE_DATA_URL_LEN) {
+        alert("That image is too large even after compressing. Try a smaller photo.");
+        return;
+      }
+      insertImageIntoNote(id, dataUrl);
+    } catch (err) {
+      alert((err && err.message) || "Couldn't insert that image.");
+    } finally {
+      fmtImageBtn.disabled = false;
+      imageInsertRange = null;
+    }
   });
 
   function openFormatToolbar(id) {
