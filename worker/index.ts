@@ -23,6 +23,16 @@ import { DurableObject } from "cloudflare:workers";
  *   clear:  { t: "clear" }
  *   cursor: { t: "cursor", x, y, color }  (never persisted)
  *
+ * Zones (labeled rectangular regions, e.g. kanban columns) reuse the same
+ * create/move/update/delete verbs with `kind: "zone"` added, so they're
+ * stored and broadcast the same way but under their own key prefix and
+ * their own history list ("zones" alongside "notes") -- and, unlike
+ * "clear", they aren't touched by a plain notes-only clear.
+ *   create: { t: "create", kind: "zone", id, x, y, w, h, label }
+ *   move:   { t: "move", kind: "zone", id, x, y }
+ *   update: { t: "update", kind: "zone", id, x?, y?, w?, h?, label? }
+ *   delete: { t: "delete", kind: "zone", id }
+ *
  * POST /board/<board-id>/vision is a separate, non-websocket endpoint: send
  * { image: "data:image/...;base64,..." } and get back { items: string[] }
  * extracted from a photo of a to-do list via the Anthropic API. It's gated
@@ -39,7 +49,9 @@ interface Env {
 }
 
 const NOTE_PREFIX = "note:";
+const ZONE_PREFIX = "zone:";
 const MAX_NOTES = 2000;
+const MAX_ZONES = 200;
 const VISION_DAILY_LIMIT = 30;
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -126,9 +138,13 @@ export class NotesBoard extends DurableObject<Env> {
     server.serializeAttachment({ id } satisfies ConnAttachment);
     this.ctx.acceptWebSocket(server);
 
-    const stored = await this.ctx.storage.list({ prefix: NOTE_PREFIX });
-    const notes = [...stored.values()];
-    server.send(JSON.stringify({ t: "history", notes }));
+    const [storedNotes, storedZones] = await Promise.all([
+      this.ctx.storage.list({ prefix: NOTE_PREFIX }),
+      this.ctx.storage.list({ prefix: ZONE_PREFIX }),
+    ]);
+    const notes = [...storedNotes.values()];
+    const zones = [...storedZones.values()];
+    server.send(JSON.stringify({ t: "history", notes, zones }));
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -179,29 +195,32 @@ export class NotesBoard extends DurableObject<Env> {
     data.from = senderId;
     const out = JSON.stringify(data);
     const noteId = typeof data.id === "string" ? data.id : null;
+    const isZone = data.kind === "zone";
+    const prefix = isZone ? ZONE_PREFIX : NOTE_PREFIX;
+    const maxCount = isZone ? MAX_ZONES : MAX_NOTES;
 
     switch (data.t) {
       case "create": {
         if (!noteId) return;
-        const count = (await this.ctx.storage.list({ prefix: NOTE_PREFIX })).size;
-        if (count >= MAX_NOTES) return;
-        await this.ctx.storage.put(NOTE_PREFIX + noteId, data as Note);
+        const count = (await this.ctx.storage.list({ prefix })).size;
+        if (count >= maxCount) return;
+        await this.ctx.storage.put(prefix + noteId, data as Note);
         this.broadcast(out, senderId);
         break;
       }
       case "move":
       case "update": {
         if (!noteId) return;
-        const existing = (await this.ctx.storage.get(NOTE_PREFIX + noteId)) as Note | undefined;
+        const existing = (await this.ctx.storage.get(prefix + noteId)) as Note | undefined;
         if (!existing) return;
         const merged = { ...existing, ...data };
-        await this.ctx.storage.put(NOTE_PREFIX + noteId, merged);
+        await this.ctx.storage.put(prefix + noteId, merged);
         this.broadcast(out, senderId);
         break;
       }
       case "delete": {
         if (!noteId) return;
-        await this.ctx.storage.delete(NOTE_PREFIX + noteId);
+        await this.ctx.storage.delete(prefix + noteId);
         this.broadcast(out, senderId);
         break;
       }

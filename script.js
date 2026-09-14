@@ -14,6 +14,8 @@
   const menuDrawer = document.getElementById("menuDrawer");
   const menuBackdrop = document.getElementById("menuBackdrop");
   const clearBtn = document.getElementById("clearBtn");
+  const createColumnsBtn = document.getElementById("createColumnsBtn");
+  const drawZoneBtn = document.getElementById("drawZoneBtn");
   const copyLinkBtn = document.getElementById("copyLinkBtn");
   const boardCodeEl = document.getElementById("boardCode");
   const connDot = document.getElementById("connDot");
@@ -36,6 +38,9 @@
   const MIN_NOTE_H = 100;
   const MAX_NOTE_W = 640;
   const MAX_NOTE_H = 560;
+  const MIN_ZONE_W = 100;
+  const MIN_ZONE_H = 80;
+  const ZONE_LABEL_MAX_LEN = 80;
   const COLORS = ["#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8"];
   const CURSOR_COLORS = ["#ff6b3d", "#4dd0e1", "#ff4d4f", "#8bc34a", "#ba68c8", "#ffd54f"];
 
@@ -321,6 +326,30 @@
     closeMenu();
   });
 
+  createColumnsBtn.addEventListener("click", () => {
+    closeMenu();
+    const input = prompt("Enter column names, separated by commas:", "To do, In progress, Done");
+    if (!input) return;
+    const names = input.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10);
+    if (names.length < 2) {
+      alert("Enter at least 2 column names, separated by commas.");
+      return;
+    }
+    const margin = 24;
+    const gap = 16;
+    const colW = (WORLD_W - margin * 2 - gap * (names.length - 1)) / names.length;
+    const colH = WORLD_H - margin * 2;
+    names.forEach((name, i) => {
+      addZone(margin + i * (colW + gap), margin, colW, colH, name);
+    });
+  });
+
+  drawZoneBtn.addEventListener("click", () => {
+    closeMenu();
+    drawZoneMode = true;
+    boardWrap.classList.add("drawing-zone");
+  });
+
   // ---------- Notes state ----------
   const notes = new Map(); // id -> {id,x,y,w,h,color,html,rot,z}
   const noteEls = new Map(); // id -> {el, header, editor, colorBtn}
@@ -441,6 +470,120 @@
 
   function clearAllNotes() {
     for (const id of [...notes.keys()]) deleteNote(id);
+  }
+
+  // ---------- Zones (columns / custom regions) ----------
+  // A zone is just a labeled rectangle drawn behind the notes -- it doesn't
+  // track which notes are "inside" it; it's purely a visual aid for
+  // dragging notes into, same as any other spot on the board.
+  const zones = new Map(); // id -> {id,x,y,w,h,label}
+  const zoneEls = new Map(); // id -> {el, header, labelEl}
+
+  function clampZoneLabel(label) {
+    return String(label == null ? "" : label).trim().slice(0, ZONE_LABEL_MAX_LEN) || "Zone";
+  }
+
+  function createZoneElement(zone) {
+    const el = document.createElement("div");
+    el.className = "zone";
+    el.dataset.id = zone.id;
+    el.style.width = zone.w + "px";
+    el.style.height = zone.h + "px";
+
+    const header = document.createElement("div");
+    header.className = "zone-header";
+
+    const labelEl = document.createElement("span");
+    labelEl.className = "zone-label";
+    labelEl.textContent = zone.label;
+    labelEl.title = "Tap to rename";
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "zone-del";
+    delBtn.textContent = "×";
+    delBtn.title = "Delete zone";
+
+    header.appendChild(labelEl);
+    header.appendChild(delBtn);
+
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "zone-resize";
+    resizeHandle.title = "Drag to resize";
+
+    el.appendChild(header);
+    el.appendChild(resizeHandle);
+    world.insertBefore(el, cursorsEl);
+
+    labelEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const next = prompt("Rename zone:", zone.label);
+      if (next === null) return;
+      setZoneLabel(zone.id, next);
+    });
+    delBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteZone(zone.id);
+      MP.sendZoneDelete(zone.id);
+    });
+
+    zoneEls.set(zone.id, { el, header, labelEl });
+    return el;
+  }
+
+  function positionZoneEl(id) {
+    const zone = zones.get(id);
+    const refs = zoneEls.get(id);
+    if (!zone || !refs) return;
+    refs.el.style.left = zone.x + "px";
+    refs.el.style.top = zone.y + "px";
+  }
+
+  function addZoneLocally(zone) {
+    zone.label = clampZoneLabel(zone.label);
+    zones.set(zone.id, zone);
+    createZoneElement(zone);
+    positionZoneEl(zone.id);
+  }
+
+  function addZone(x, y, w, h, label) {
+    const id = makeId();
+    const zone = { id, x, y, w, h, label: clampZoneLabel(label) };
+    addZoneLocally(zone);
+    MP.sendZoneCreate(zone);
+    return id;
+  }
+
+  function deleteZone(id) {
+    zones.delete(id);
+    const refs = zoneEls.get(id);
+    if (refs) refs.el.remove();
+    zoneEls.delete(id);
+  }
+
+  function setZoneLabel(id, label) {
+    const zone = zones.get(id);
+    if (!zone) return;
+    zone.label = clampZoneLabel(label);
+    const refs = zoneEls.get(id);
+    if (refs) refs.labelEl.textContent = zone.label;
+    MP.sendZoneUpdate(id, { label: zone.label });
+  }
+
+  function applyRemoteZone(data) {
+    const zone = zones.get(data.id);
+    if (!zone) return;
+    Object.assign(zone, data);
+    delete zone.from;
+    delete zone.t;
+    delete zone.kind;
+    if (typeof data.label === "string") zone.label = clampZoneLabel(data.label);
+    const refs = zoneEls.get(data.id);
+    if (refs) {
+      refs.labelEl.textContent = zone.label;
+      if (typeof data.w === "number") refs.el.style.width = zone.w + "px";
+      if (typeof data.h === "number") refs.el.style.height = zone.h + "px";
+    }
+    positionZoneEl(data.id);
   }
 
   function selectNote(id) {
@@ -842,7 +985,7 @@
   });
 
   boardWrap.addEventListener("dblclick", (e) => {
-    if (isUiChrome(e.target) || e.target.closest(".note")) return;
+    if (isUiChrome(e.target) || e.target.closest(".note") || e.target.closest(".zone-header") || e.target.closest(".zone-resize")) return;
     const p = screenToWorld(e.clientX, e.clientY);
     addNote(p.x, p.y);
   });
@@ -862,6 +1005,16 @@
   let resizePointerId = null;
   let resizeNoteId = null;
   let resizeStart = null;
+  let zoneDragPointerId = null;
+  let zoneDragId = null;
+  let zoneDragOffset = null;
+  let zoneResizePointerId = null;
+  let zoneResizeId = null;
+  let zoneResizeStart = null;
+  let drawZoneMode = false;
+  let zoneDrawPointerId = null;
+  let zoneDrawStart = null;
+  let zoneDrawPreviewEl = null;
 
   function pointDist(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);
@@ -897,6 +1050,20 @@
     resizeNoteId = null;
     resizePointerId = null;
     resizeStart = null;
+    zoneDragId = null;
+    zoneDragPointerId = null;
+    zoneDragOffset = null;
+    zoneResizeId = null;
+    zoneResizePointerId = null;
+    zoneResizeStart = null;
+    cancelZoneDraw();
+  }
+
+  function cancelZoneDraw() {
+    if (zoneDrawPreviewEl) zoneDrawPreviewEl.remove();
+    zoneDrawPreviewEl = null;
+    zoneDrawPointerId = null;
+    zoneDrawStart = null;
   }
 
   boardWrap.addEventListener("pointerdown", (e) => {
@@ -941,6 +1108,49 @@
     }
 
     if (e.target.closest(".note")) return; // let the editor/buttons handle it natively
+
+    const zoneHeaderEl = e.target.closest(".zone-header");
+    if (zoneHeaderEl && !e.target.closest("button") && !e.target.closest(".zone-label")) {
+      const zoneEl = zoneHeaderEl.closest(".zone");
+      const id = zoneEl.dataset.id;
+      const zone = zones.get(id);
+      if (!zone) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      zoneDragOffset = { x: world.x - zone.x, y: world.y - zone.y };
+      zoneDragId = id;
+      zoneDragPointerId = e.pointerId;
+      e.preventDefault();
+      return;
+    }
+
+    const zoneResizeEl = e.target.closest(".zone-resize");
+    if (zoneResizeEl) {
+      const zoneEl = zoneResizeEl.closest(".zone");
+      const id = zoneEl.dataset.id;
+      const zone = zones.get(id);
+      if (!zone) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      zoneResizeStart = { worldX: world.x, worldY: world.y, w: zone.w, h: zone.h };
+      zoneResizeId = id;
+      zoneResizePointerId = e.pointerId;
+      e.preventDefault();
+      return;
+    }
+
+    if (drawZoneMode) {
+      const p = screenToWorld(e.clientX, e.clientY);
+      zoneDrawStart = p;
+      zoneDrawPointerId = e.pointerId;
+      zoneDrawPreviewEl = document.createElement("div");
+      zoneDrawPreviewEl.className = "zone-draw-preview";
+      zoneDrawPreviewEl.style.left = p.x + "px";
+      zoneDrawPreviewEl.style.top = p.y + "px";
+      zoneDrawPreviewEl.style.width = "0px";
+      zoneDrawPreviewEl.style.height = "0px";
+      world.insertBefore(zoneDrawPreviewEl, cursorsEl);
+      e.preventDefault();
+      return;
+    }
 
     panPointerId = e.pointerId;
     panAnchorWorld = screenToWorld(e.clientX, e.clientY);
@@ -991,6 +1201,53 @@
       return;
     }
 
+    if (zoneDragId && e.pointerId === zoneDragPointerId) {
+      const zone = zones.get(zoneDragId);
+      if (!zone) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      zone.x = world.x - zoneDragOffset.x;
+      zone.y = world.y - zoneDragOffset.y;
+      positionZoneEl(zoneDragId);
+      const now = performance.now();
+      if (now - lastMoveSent > 60) {
+        MP.sendZoneMove(zoneDragId, zone.x, zone.y);
+        lastMoveSent = now;
+      }
+      return;
+    }
+
+    if (zoneResizeId && e.pointerId === zoneResizePointerId) {
+      const zone = zones.get(zoneResizeId);
+      if (!zone) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      zone.w = Math.max(MIN_ZONE_W, zoneResizeStart.w + (world.x - zoneResizeStart.worldX));
+      zone.h = Math.max(MIN_ZONE_H, zoneResizeStart.h + (world.y - zoneResizeStart.worldY));
+      const refs = zoneEls.get(zoneResizeId);
+      if (refs) {
+        refs.el.style.width = zone.w + "px";
+        refs.el.style.height = zone.h + "px";
+      }
+      const now = performance.now();
+      if (now - lastMoveSent > 60) {
+        MP.sendZoneUpdate(zoneResizeId, { w: Math.round(zone.w), h: Math.round(zone.h) });
+        lastMoveSent = now;
+      }
+      return;
+    }
+
+    if (zoneDrawPointerId === e.pointerId && zoneDrawStart && zoneDrawPreviewEl) {
+      const world = screenToWorld(e.clientX, e.clientY);
+      const x = Math.min(zoneDrawStart.x, world.x);
+      const y = Math.min(zoneDrawStart.y, world.y);
+      const w = Math.abs(world.x - zoneDrawStart.x);
+      const h = Math.abs(world.y - zoneDrawStart.y);
+      zoneDrawPreviewEl.style.left = x + "px";
+      zoneDrawPreviewEl.style.top = y + "px";
+      zoneDrawPreviewEl.style.width = w + "px";
+      zoneDrawPreviewEl.style.height = h + "px";
+      return;
+    }
+
     if (panPointerId === e.pointerId && panAnchorWorld) {
       const rect = boardWrap.getBoundingClientRect();
       camera.x = panAnchorWorld.x - (e.clientX - rect.left) / camera.scale;
@@ -1026,6 +1283,36 @@
     if (panPointerId === e.pointerId) {
       panPointerId = null;
       panAnchorWorld = null;
+    }
+    if (zoneDragId && e.pointerId === zoneDragPointerId) {
+      const zone = zones.get(zoneDragId);
+      if (zone) MP.sendZoneMove(zoneDragId, zone.x, zone.y);
+      zoneDragId = null;
+      zoneDragPointerId = null;
+      zoneDragOffset = null;
+    }
+    if (zoneResizeId && e.pointerId === zoneResizePointerId) {
+      const zone = zones.get(zoneResizeId);
+      if (zone) MP.sendZoneUpdate(zoneResizeId, { w: Math.round(zone.w), h: Math.round(zone.h) });
+      zoneResizeId = null;
+      zoneResizePointerId = null;
+      zoneResizeStart = null;
+    }
+    if (zoneDrawPointerId === e.pointerId && zoneDrawStart) {
+      const world = screenToWorld(e.clientX, e.clientY);
+      const x = Math.min(zoneDrawStart.x, world.x);
+      const y = Math.min(zoneDrawStart.y, world.y);
+      const w = Math.abs(world.x - zoneDrawStart.x);
+      const h = Math.abs(world.y - zoneDrawStart.y);
+      cancelZoneDraw();
+      drawZoneMode = false;
+      boardWrap.classList.remove("drawing-zone");
+      if (w >= 20 && h >= 20) {
+        const label = prompt("Name this zone:", "Zone");
+        if (label !== null) {
+          addZone(x, y, Math.max(MIN_ZONE_W, w), Math.max(MIN_ZONE_H, h), label);
+        }
+      }
     }
   });
 
@@ -1135,16 +1422,29 @@
               console.error("Failed to add note from history", note, err);
             }
           }
+          for (const zone of msg.zones || []) {
+            try {
+              addZoneLocally(zone);
+            } catch (err) {
+              console.error("Failed to add zone from history", zone, err);
+            }
+          }
           break;
         case "create":
-          if (!notes.has(msg.id)) addNoteLocally(msg);
+          if (msg.kind === "zone") {
+            if (!zones.has(msg.id)) addZoneLocally(msg);
+          } else if (!notes.has(msg.id)) {
+            addNoteLocally(msg);
+          }
           break;
         case "move":
         case "update":
-          applyRemoteNote(msg);
+          if (msg.kind === "zone") applyRemoteZone(msg);
+          else applyRemoteNote(msg);
           break;
         case "delete":
-          deleteNote(msg.id);
+          if (msg.kind === "zone") deleteZone(msg.id);
+          else deleteNote(msg.id);
           break;
         case "clear":
           clearAllNotes();
@@ -1216,6 +1516,10 @@
       sendUpdate: (id, fields) => send({ t: "update", id, ...fields }),
       sendDelete: (id) => send({ t: "delete", id }),
       sendClear: () => send({ t: "clear" }),
+      sendZoneCreate: (zone) => send({ t: "create", kind: "zone", ...zone }),
+      sendZoneMove: (id, x, y) => send({ t: "move", kind: "zone", id, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 }),
+      sendZoneUpdate: (id, fields) => send({ t: "update", kind: "zone", id, ...fields }),
+      sendZoneDelete: (id) => send({ t: "delete", kind: "zone", id }),
     };
   })();
 

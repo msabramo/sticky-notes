@@ -148,6 +148,87 @@ body {
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
 }
 
+/* ---------- Zones (columns / custom regions) ---------- */
+.zone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0; /* always behind notes, whose z-index comes from a huge z counter */
+  border: 2px dashed rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  pointer-events: none; /* lets clicks/drags pass through to the board or notes beneath */
+}
+
+.zone-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 4px 0 10px;
+  cursor: grab;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 8px 8px 0 0;
+}
+.zone-header:active { cursor: grabbing; }
+
+.zone-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+.zone-label:hover { color: var(--text); }
+
+.zone-del {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.zone-del:hover { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+
+.zone-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  pointer-events: auto;
+  cursor: nwse-resize;
+  touch-action: none;
+  background:
+    linear-gradient(135deg, transparent 0 45%, rgba(255, 255, 255, 0.3) 45% 55%, transparent 55% 100%),
+    linear-gradient(135deg, transparent 0 65%, rgba(255, 255, 255, 0.3) 65% 75%, transparent 75% 100%);
+}
+
+.zone-draw-preview {
+  position: absolute;
+  z-index: 0;
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  background: rgba(255, 107, 61, 0.12);
+  pointer-events: none;
+}
+
+.board-wrap.drawing-zone { cursor: crosshair; }
+
 /* ---------- Sticky note ---------- */
 .note {
   position: absolute;
