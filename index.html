@@ -7,7 +7,7 @@
        it prints, e.g. sticky-notes.YOUR-SUBDOMAIN.workers.dev -->
   <meta name="worker-host" content="sticky-notes.mintyfreshapps.workers.dev" />
   <title>Sticky Notes</title>
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <div class="app">
@@ -45,6 +45,8 @@
         <button class="color-opt" data-color="#ce93d8" style="background:#ce93d8"></button>
       </div>
 
+      <div class="note-fields-popover" id="noteFieldsPopover" hidden></div>
+
       <div class="format-toolbar" id="formatToolbar" hidden>
         <div class="format-row">
           <button type="button" class="format-btn" id="fmtBoldBtn" title="Bold"><b>B</b></button>
@@ -72,13 +74,27 @@
     </div>
     <div class="menu-divider"></div>
     <div class="menu-section actions">
+      <button id="manageFieldsBtn" class="btn">🏷 Manage Fields</button>
       <button id="clearBtn" class="btn danger">🗑 Clear Board</button>
       <a href="?" id="newBoardLink" class="btn">✨ Start a New Board</a>
     </div>
     <div class="menu-divider"></div>
-    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, and size — select some text first to format just that part. Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
+    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color, and the Aa button for bold/italic/underline, headings, fonts, and size — select some text first to format just that part. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields). Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
   </aside>
 
-  <script src="script.js?v=3"></script>
+  <div class="fields-modal-backdrop no-print" id="fieldsModalBackdrop"></div>
+  <div class="fields-modal no-print" id="fieldsModal" hidden>
+    <div class="fields-modal-header">
+      <h2>Board Fields</h2>
+      <button id="fieldsModalCloseBtn" class="icon-btn" title="Close" aria-label="Close">×</button>
+    </div>
+    <div class="fields-modal-body" id="fieldsList"></div>
+    <div class="fields-modal-footer">
+      <div class="fields-presets" id="fieldsPresets"></div>
+      <button id="addFieldBtn" class="btn">+ Add Field</button>
+    </div>
+  </div>
+
+  <script src="script.js?v=4"></script>
 </body>
 </html>

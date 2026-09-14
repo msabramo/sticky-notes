@@ -56,6 +56,20 @@ same coordinate space, so notes always line up between devices.
   note's header for bold/italic/underline, headings, a font picker
   (a real list of named fonts, not just five presets), and font size.
   With nothing selected, a change applies to the whole note.
+- **Custom fields** — tap the 🏷 button in a note's header to set values for
+  whatever metadata fields the board defines (e.g. Status, Assignee,
+  Priority, Tags, Due date), shown as small colored chips on the note.
+  Define the fields themselves from the hamburger menu → **Manage Fields**:
+  add a field, name it, and pick a type — text, number, checkbox, date,
+  single-select, or multi-select (tags) — with a few one-tap presets to get
+  started. Select/multi-select fields have their own colored options (e.g.
+  "To do / In progress / Done" for Status), so a board can be run as a
+  lightweight kanban-style todo list. There are no accounts in this app (see
+  Known limitations), so "Assignee" isn't tied to a real identity — it's
+  just a field like any other, typically free text or a select whose
+  options are the names of whoever uses the board. Field definitions are
+  shared board-wide state, just like the notes; clearing the board wipes
+  notes but leaves the field definitions in place.
 - **Delete** — tap the × button in a note's header.
 - **Photo to notes** — tap 📷 (bottom-left, above **+**) to snap or pick a
   photo of a handwritten or printed to-do list; each item it finds
@@ -69,7 +83,9 @@ same coordinate space, so notes always line up between devices.
 
 Not in this pass: images/attachments, connectors between notes, and
 per-user identity (cursors are just colored blobs, chosen randomly per
-session) — natural next additions rather than being folded in here.
+session) — natural next additions rather than being folded in here. (A
+board-wide custom-fields system covers todo-style status/assignee/tags
+without needing real accounts — see Custom fields above.)
 
 ## Backend: Cloudflare Workers + Durable Objects
 
@@ -80,7 +96,12 @@ event log, a board is a flat set of mutable notes keyed by id in its own
 SQLite-backed storage — creating, moving, editing, and deleting a note
 just writes or removes that one key, and a new connection is caught up
 by sending every note as it currently stands. Live cursor positions are
-relayed but never persisted.
+relayed but never persisted. A note's custom-field values ride along as
+an opaque `fields` property on the note itself (the server never inspects
+note content), while the board's custom-field *definitions* — the schema
+those values are validated against client-side — are stored under a
+separate key so "Clear Board" (which only wipes notes) leaves them
+intact, and are sent to a new connection alongside note history.
 
 This runs on Cloudflare's **Workers Free plan** — Durable Objects
 (SQLite-backed) are included at no cost, no credit card required, with

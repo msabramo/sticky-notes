@@ -342,6 +342,269 @@ body {
 }
 .format-select-wide { flex: 2; }
 
+/* ---------- Note fields (custom metadata) ---------- */
+.note-fields-row {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px 8px 0;
+}
+.note-fields-row[hidden] { display: none; }
+
+.field-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.12);
+  color: rgba(0, 0, 0, 0.75);
+  font-size: 9.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Per-note fields popover ---------- */
+.note-fields-popover {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  width: 240px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.note-fields-popover[hidden] { display: none; }
+
+.note-fields-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.note-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.note-field-row label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.note-field-row input[type="text"],
+.note-field-row input[type="number"],
+.note-field-row input[type="date"],
+.note-field-row select {
+  width: 100%;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 6px;
+}
+.note-field-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+
+.note-field-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.option-toggle {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.75);
+  cursor: pointer;
+  opacity: 0.55;
+}
+.option-toggle.active {
+  opacity: 1;
+  border-color: #fff;
+}
+
+/* ---------- Board fields manager modal ---------- */
+.fields-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 29;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.fields-modal-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.fields-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  max-width: 92vw;
+  max-height: 82vh;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fields-modal[hidden] { display: none; }
+
+.fields-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.fields-modal-header h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.fields-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fields-empty-hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.field-def-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-def-top {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.field-name-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  padding: 0 8px;
+}
+.field-type-select {
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.icon-btn.danger { color: var(--danger); border-color: var(--danger); background: transparent; }
+.icon-btn:hover { background: #2a2f3a; }
+
+.field-options-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+.field-option-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.field-option-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 6px;
+}
+.color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.fields-modal-footer {
+  border-top: 1px solid var(--border);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fields-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.fields-presets-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.btn.small {
+  display: inline-block;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+@media (max-width: 480px) {
+  .note-fields-popover { width: 200px; }
+}
+
 /* ---------- Zoom controls ---------- */
 .zoom-controls {
   position: absolute;
