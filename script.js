@@ -749,7 +749,14 @@
   const notes = new Map(); // id -> {id,x,y,w,h,color,html,rot,z}
   const noteEls = new Map(); // id -> {el, header, editor, colorBtn}
   let zCounter = Date.now();
+  // selectedId is the single "primary" selection -- the target of edit
+  // mode, the color/fields popovers, and resize (all inherently
+  // single-note operations). selectedIds is the full set of notes
+  // highlighted and dragged together; for an ordinary single click it's
+  // just {selectedId}, but Cmd/Ctrl-click and lasso-select (see the
+  // boardWrap pointerdown handler) can grow it to more than one note.
   let selectedId = null;
+  const selectedIds = new Set();
 
   function initialNoteHtml(note) {
     if (typeof note.html === "string") return sanitizeHtml(note.html);
@@ -944,6 +951,7 @@
     const refs = noteEls.get(id);
     if (refs) refs.el.remove();
     noteEls.delete(id);
+    selectedIds.delete(id);
     if (selectedId === id) selectedId = null;
     if (fieldsPopoverNoteId === id) closeNoteFieldsPopover();
     if (editingNoteId === id || formatTargetId === id) exitEditMode(id);
@@ -1193,10 +1201,34 @@
     MP.sendMove(id, note.x, note.y, note.z);
   }
 
-  function recordNoteMove(id, before, after) {
+  // `moves` is [{id, before, after}] -- one undo entry for every note that
+  // relocated together in the same drag (a lone note is just a group of
+  // one). Each settles into its own zone independently on drop, so their
+  // positions can't be reconstructed from a single shared delta -- undo
+  // needs every note's own before/after pair.
+  function recordNoteGroupMove(moves) {
     pushHistory({
-      undo: () => setNotePosition(id, before),
-      redo: () => setNotePosition(id, after),
+      undo: () => { for (const m of moves) setNotePosition(m.id, m.before); },
+      redo: () => { for (const m of moves) setNotePosition(m.id, m.after); },
+    });
+  }
+
+  // `deletedNotes` is a snapshot of every note removed together (bulk
+  // Delete/Backspace over a multi-selection, or just one).
+  function recordNoteGroupDelete(deletedNotes) {
+    pushHistory({
+      undo: () => {
+        for (const n of deletedNotes) {
+          addNoteLocally(n);
+          MP.sendCreate(n);
+        }
+      },
+      redo: () => {
+        for (const n of deletedNotes) {
+          deleteNote(n.id);
+          MP.sendDelete(n.id);
+        }
+      },
     });
   }
 
@@ -1465,16 +1497,54 @@
     }
   }
 
-  function selectNote(id) {
-    if (selectedId && noteEls.has(selectedId)) {
-      noteEls.get(selectedId).el.classList.remove("selected");
+  function clearSelectionHighlight() {
+    for (const id of selectedIds) {
+      if (noteEls.has(id)) noteEls.get(id).el.classList.remove("selected");
     }
+    selectedIds.clear();
+  }
+
+  // Replaces the whole selection with exactly `id` -- the ordinary
+  // single-click path, and also what a multi-selection collapses back to
+  // (resize, entering edit mode, a plain click on one of several selected
+  // notes without a drag).
+  function selectNote(id) {
+    clearSelectionHighlight();
     selectedId = id;
+    selectedIds.add(id);
     bringToFront(id);
     if (noteEls.has(id)) noteEls.get(id).el.classList.add("selected");
     // Moving selection to a different note (a click, a drag, a resize) means
     // we're no longer editing whatever note was previously being edited.
     if (editingNoteId && editingNoteId !== id) exitEditMode(editingNoteId);
+  }
+
+  // Cmd/Ctrl-click: adds/removes one note from the selection without
+  // disturbing the rest of it. Never used to enter edit mode.
+  function toggleNoteSelection(id) {
+    if (editingNoteId) exitEditMode(editingNoteId);
+    if (selectedIds.has(id)) {
+      selectedIds.delete(id);
+      if (noteEls.has(id)) noteEls.get(id).el.classList.remove("selected");
+      if (selectedId === id) selectedId = [...selectedIds].pop() ?? null;
+    } else {
+      selectedIds.add(id);
+      selectedId = id;
+      bringToFront(id);
+      if (noteEls.has(id)) noteEls.get(id).el.classList.add("selected");
+    }
+  }
+
+  // Replaces the whole selection with a set of ids at once -- used by
+  // lasso-select once a drag rectangle is released.
+  function selectNotes(ids) {
+    clearSelectionHighlight();
+    for (const id of ids) {
+      selectedIds.add(id);
+      if (noteEls.has(id)) noteEls.get(id).el.classList.add("selected");
+    }
+    selectedId = ids.length ? ids[ids.length - 1] : null;
+    if (editingNoteId && !selectedIds.has(editingNoteId)) exitEditMode(editingNoteId);
   }
 
   // The note currently in "edit mode": contentEditable, I-beam cursor,
@@ -1540,9 +1610,7 @@
   }
 
   function deselectNote() {
-    if (selectedId && noteEls.has(selectedId)) {
-      noteEls.get(selectedId).el.classList.remove("selected");
-    }
+    clearSelectionHighlight();
     selectedId = null;
     closeColorPopover();
     if (editingNoteId) exitEditMode(editingNoteId);
@@ -3084,13 +3152,21 @@
   let pinch = null;
   let panPointerId = null;
   let panAnchorWorld = null;
+  // Holding Space pans on drag, overriding note/zone drag and lasso-select
+  // -- the Figma/Miro convention -- while a plain drag on empty board space
+  // is the lasso (see the boardWrap pointerdown handler below). Tracked via
+  // keydown/keyup rather than checking e.getModifierState in the pointer
+  // handlers, since spacebar isn't reported as a event.shiftKey-style flag.
+  let spacePanActive = false;
   let dragPointerId = null;
-  let dragNoteId = null;
+  let dragNoteId = null; // the note under the pointer -- drives dragOffset/positioning
+  let dragGroupIds = []; // every note moving together (dragNoteId plus the rest of the selection, when it's part of one)
   let dragOffset = null;
   let dragMoved = false; // whether a note drag actually relocated it -- a plain click shouldn't trigger zone snapping
   let dragStartScreen = null; // screen coords at pointerdown, for the click-vs-drag threshold
-  let dragStartPos = null; // note's {x,y} at pointerdown, for an undo entry once the drag ends
+  let dragGroupStartPos = null; // Map<id, {x,y}> for the whole dragGroupIds at pointerdown, for an undo entry once the drag ends
   let dragEnterEditOnClick = false; // pointerdown landed on an already-selected, not-yet-editing note -- a plain click (no drag) enters edit mode
+  let dragCollapseOnClick = false; // pointerdown landed on a note that's part of a larger selection -- a plain click (no drag) collapses the selection down to just it
   let lastMoveSent = 0;
   let resizePointerId = null;
   let resizeNoteId = null;
@@ -3106,6 +3182,12 @@
   let zoneDrawPointerId = null;
   let zoneDrawStart = null;
   let zoneDrawPreviewEl = null;
+  // Plain drag on empty board space: draws a marquee rectangle and, on
+  // release, selects every note it overlaps -- see the boardWrap
+  // pointerdown/pointermove/pointerup handlers below.
+  let lassoPointerId = null;
+  let lassoStart = null;
+  let lassoPreviewEl = null;
 
   function pointDist(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);
@@ -3134,14 +3216,17 @@
 
   function cancelDragAndPan() {
     dragNoteId = null;
+    dragGroupIds = [];
     dragPointerId = null;
     dragOffset = null;
     dragMoved = false;
     dragStartScreen = null;
-    dragStartPos = null;
+    dragGroupStartPos = null;
     dragEnterEditOnClick = false;
+    dragCollapseOnClick = false;
     panPointerId = null;
     panAnchorWorld = null;
+    boardWrap.classList.remove("panning");
     resizeNoteId = null;
     resizePointerId = null;
     resizeStart = null;
@@ -3153,6 +3238,7 @@
     zoneResizePointerId = null;
     zoneResizeStart = null;
     cancelZoneDraw();
+    cancelLassoDraw();
   }
 
   function cancelZoneDraw() {
@@ -3161,6 +3247,42 @@
     zoneDrawPointerId = null;
     zoneDrawStart = null;
   }
+
+  function cancelLassoDraw() {
+    if (lassoPreviewEl) lassoPreviewEl.remove();
+    lassoPreviewEl = null;
+    lassoPointerId = null;
+    lassoStart = null;
+  }
+
+  function rectsIntersect(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function isEditableTarget(el) {
+    return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+  }
+
+  function setSpacePan(active) {
+    spacePanActive = active;
+    boardWrap.classList.toggle("space-pan", active);
+    if (!active) boardWrap.classList.remove("panning");
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" || e.repeat || spacePanActive) return;
+    if (isEditableTarget(document.activeElement)) return; // let it type a space instead
+    setSpacePan(true);
+    e.preventDefault(); // stop the page from scrolling
+  });
+  document.addEventListener("keyup", (e) => {
+    if (e.code !== "Space") return;
+    setSpacePan(false);
+  });
+  // No keyup reaches us if focus leaves the window entirely (alt-tab,
+  // devtools, a native file/color picker) while Space is still held --
+  // drop pan mode rather than leave it stuck on.
+  window.addEventListener("blur", () => setSpacePan(false));
 
   boardWrap.addEventListener("pointerdown", (e) => {
     if (isUiChrome(e.target)) return;
@@ -3172,6 +3294,17 @@
       return;
     }
     if (activePointers.size > 2) return;
+
+    // Holding Space always pans -- checked ahead of every other hit-test so
+    // it overrides dragging a note/zone or starting a lasso, no matter
+    // what's under the pointer.
+    if (spacePanActive) {
+      panPointerId = e.pointerId;
+      panAnchorWorld = screenToWorld(e.clientX, e.clientY);
+      boardWrap.classList.add("panning");
+      e.preventDefault();
+      return;
+    }
 
     const resizeEl = e.target.closest(".note-resize");
     if (resizeEl) {
@@ -3211,16 +3344,37 @@
       } else if (checklistCheckboxHit(e)) {
         return;
       }
-      const wasAlreadySelected = selectedId === id;
-      selectNote(id);
+      // Cmd/Ctrl-click only (de)selects this note within the current
+      // selection -- it never starts a drag, so toggling a note off a
+      // multi-selection can't be mistaken for the start of a move.
+      if (!editing && (e.metaKey || e.ctrlKey)) {
+        toggleNoteSelection(id);
+        e.preventDefault();
+        return;
+      }
+      // Dragging a note that's already part of a multi-note selection moves
+      // the whole selection together; dragging any other note falls back to
+      // the ordinary single-select-and-drag behavior.
+      const partOfSelection = !editing && selectedIds.size > 1 && selectedIds.has(id);
+      const wasAlreadySelected = selectedId === id && selectedIds.size === 1;
+      if (partOfSelection) {
+        if (editingNoteId) exitEditMode(editingNoteId);
+      } else {
+        selectNote(id);
+      }
       const world = screenToWorld(e.clientX, e.clientY);
       dragOffset = { x: world.x - note.x, y: world.y - note.y };
       dragNoteId = id;
+      dragGroupIds = partOfSelection ? [...selectedIds] : [id];
       dragPointerId = e.pointerId;
       dragMoved = false;
       dragStartScreen = { x: e.clientX, y: e.clientY };
-      dragStartPos = { x: note.x, y: note.y };
+      dragGroupStartPos = new Map(dragGroupIds.map((gid) => {
+        const n = notes.get(gid);
+        return [gid, { x: n.x, y: n.y }];
+      }));
       dragEnterEditOnClick = !editing && wasAlreadySelected;
+      dragCollapseOnClick = partOfSelection;
       e.preventDefault();
       return;
     }
@@ -3269,9 +3423,20 @@
       return;
     }
 
-    panPointerId = e.pointerId;
-    panAnchorWorld = screenToWorld(e.clientX, e.clientY);
-    deselectNote();
+    // A plain drag on empty board space draws a marquee ("lasso") that
+    // selects every note it overlaps on release; hold Space to pan instead
+    // (handled above, ahead of every hit-test).
+    const p = screenToWorld(e.clientX, e.clientY);
+    lassoStart = p;
+    lassoPointerId = e.pointerId;
+    lassoPreviewEl = document.createElement("div");
+    lassoPreviewEl.className = "lasso-preview";
+    lassoPreviewEl.style.left = p.x + "px";
+    lassoPreviewEl.style.top = p.y + "px";
+    lassoPreviewEl.style.width = "0px";
+    lassoPreviewEl.style.height = "0px";
+    world.insertBefore(lassoPreviewEl, cursorsEl);
+    e.preventDefault();
   });
 
   window.addEventListener("pointermove", (e) => {
@@ -3289,16 +3454,32 @@
       if (!dragMoved) {
         if (pointDist({ x: e.clientX, y: e.clientY }, dragStartScreen) < CLICK_DRAG_THRESHOLD_PX) return;
         dragMoved = true;
-        const refs = noteEls.get(dragNoteId);
-        if (refs) refs.el.classList.add("dragging");
+        for (const gid of dragGroupIds) {
+          const refs = noteEls.get(gid);
+          if (refs) refs.el.classList.add("dragging");
+          bringToFront(gid);
+        }
       }
       const world = screenToWorld(e.clientX, e.clientY);
-      note.x = world.x - dragOffset.x;
-      note.y = world.y - dragOffset.y;
-      positionNoteEl(dragNoteId);
+      const newX = world.x - dragOffset.x;
+      const newY = world.y - dragOffset.y;
+      const dx = newX - note.x;
+      const dy = newY - note.y;
+      // Every note in the group moves by the same delta as the one under
+      // the pointer, keeping their relative layout intact.
+      for (const gid of dragGroupIds) {
+        const n = notes.get(gid);
+        if (!n) continue;
+        n.x += dx;
+        n.y += dy;
+        positionNoteEl(gid);
+      }
       const now = performance.now();
       if (now - lastMoveSent > 60) {
-        MP.sendMove(dragNoteId, note.x, note.y, note.z);
+        for (const gid of dragGroupIds) {
+          const n = notes.get(gid);
+          if (n) MP.sendMove(gid, n.x, n.y, n.z);
+        }
         lastMoveSent = now;
       }
       return;
@@ -3371,6 +3552,19 @@
       return;
     }
 
+    if (lassoPointerId === e.pointerId && lassoStart && lassoPreviewEl) {
+      const world = screenToWorld(e.clientX, e.clientY);
+      const x = Math.min(lassoStart.x, world.x);
+      const y = Math.min(lassoStart.y, world.y);
+      const w = Math.abs(world.x - lassoStart.x);
+      const h = Math.abs(world.y - lassoStart.y);
+      lassoPreviewEl.style.left = x + "px";
+      lassoPreviewEl.style.top = y + "px";
+      lassoPreviewEl.style.width = w + "px";
+      lassoPreviewEl.style.height = h + "px";
+      return;
+    }
+
     if (panPointerId === e.pointerId && panAnchorWorld) {
       const rect = boardWrap.getBoundingClientRect();
       camera.x = panAnchorWorld.x - (e.clientX - rect.left) / camera.scale;
@@ -3393,24 +3587,44 @@
       const note = notes.get(dragNoteId);
       if (note) {
         if (dragMoved) {
-          finalizeNoteDrop(dragNoteId, e.altKey);
-          if (dragStartPos && (note.x !== dragStartPos.x || note.y !== dragStartPos.y)) {
-            recordNoteMove(dragNoteId, dragStartPos, { x: note.x, y: note.y });
+          // Each note in the group settles into whichever zone it landed
+          // in independently, same as if it had been dragged alone -- so
+          // the undo entry needs every note's own before/after position,
+          // not one shared delta.
+          for (const gid of dragGroupIds) finalizeNoteDrop(gid, e.altKey);
+          if (dragGroupStartPos) {
+            const moves = [];
+            for (const gid of dragGroupIds) {
+              const n = notes.get(gid);
+              const before = dragGroupStartPos.get(gid);
+              if (n && before && (n.x !== before.x || n.y !== before.y)) {
+                moves.push({ id: gid, before, after: { x: n.x, y: n.y } });
+              }
+            }
+            if (moves.length) recordNoteGroupMove(moves);
           }
+        } else if (dragCollapseOnClick) {
+          // A plain click (no drag) on a note that was part of a larger
+          // selection collapses the selection down to just this one.
+          selectNote(dragNoteId);
         } else {
           MP.sendMove(dragNoteId, note.x, note.y, note.z);
           if (dragEnterEditOnClick) enterEditMode(dragNoteId, e.clientX, e.clientY);
         }
       }
-      const refs = noteEls.get(dragNoteId);
-      if (refs) refs.el.classList.remove("dragging");
+      for (const gid of dragGroupIds) {
+        const refs = noteEls.get(gid);
+        if (refs) refs.el.classList.remove("dragging");
+      }
       dragNoteId = null;
+      dragGroupIds = [];
       dragPointerId = null;
       dragOffset = null;
       dragMoved = false;
       dragStartScreen = null;
-      dragStartPos = null;
+      dragGroupStartPos = null;
       dragEnterEditOnClick = false;
+      dragCollapseOnClick = false;
     }
     if (resizeNoteId && e.pointerId === resizePointerId) {
       const note = notes.get(resizeNoteId);
@@ -3427,6 +3641,7 @@
     if (panPointerId === e.pointerId) {
       panPointerId = null;
       panAnchorWorld = null;
+      boardWrap.classList.remove("panning");
     }
     if (zoneDragId && e.pointerId === zoneDragPointerId) {
       const zone = zones.get(zoneDragId);
@@ -3469,6 +3684,44 @@
         }
       }
     }
+    if (lassoPointerId === e.pointerId && lassoStart) {
+      const world = screenToWorld(e.clientX, e.clientY);
+      const x = Math.min(lassoStart.x, world.x);
+      const y = Math.min(lassoStart.y, world.y);
+      const w = Math.abs(world.x - lassoStart.x);
+      const h = Math.abs(world.y - lassoStart.y);
+      cancelLassoDraw();
+      if (w >= 4 || h >= 4) {
+        const rect = { x, y, w, h };
+        const hitIds = [...notes.values()]
+          .filter((n) => rectsIntersect(rect, { x: n.x, y: n.y, w: n.w, h: n.h }))
+          .map((n) => n.id);
+        if (hitIds.length) selectNotes(hitIds);
+        else deselectNote();
+      } else {
+        deselectNote();
+      }
+    }
+  });
+
+  // Delete/Backspace removes every selected note, as long as focus isn't
+  // sitting in a text field somewhere (a note being edited, an input in a
+  // popover/modal) where the key should just edit text instead.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Delete" && e.key !== "Backspace") return;
+    if (editingNoteId) return;
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT" || active.isContentEditable)) {
+      return;
+    }
+    if (!selectedIds.size) return;
+    e.preventDefault();
+    const deleted = [...selectedIds].map((id) => notes.get(id)).filter(Boolean);
+    for (const id of [...selectedIds]) {
+      deleteNote(id);
+      MP.sendDelete(id);
+    }
+    if (deleted.length) recordNoteGroupDelete(deleted);
   });
 
   // ---------- Multiplayer (Cloudflare Worker + Durable Objects) ----------
