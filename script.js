@@ -618,7 +618,11 @@
   // Like the custom fields schema, the chosen background is board-wide state
   // synced to every peer (see MP.sendBackground / the "background" message)
   // rather than a per-viewer preference, so everyone sees the same board.
-  const BOARD_BACKGROUNDS = ["grid", "whiteboard", "snow", "linen", "blush", "chalkboard", "pinboard"];
+  const BOARD_BACKGROUNDS = [
+    "grid", "whiteboard", "snow", "linen", "blush",
+    "plain-white", "plain-tan", "plain-pink",
+    "chalkboard", "pinboard",
+  ];
   let boardBackground = "grid";
 
   function normalizeBackground(bg) {
