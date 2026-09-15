@@ -71,10 +71,24 @@ import { DurableObject } from "cloudflare:workers";
  * not real authentication, so a per-board daily cap (VISION_DAILY_LIMIT)
  * bounds the damage if a board URL ever leaks, given the endpoint spends
  * the shared ANTHROPIC_API_KEY on every call.
+ *
+ * POST /board/<board-id>/view-link mints (or returns the board's existing)
+ * read-only viewer token and registers it with the ViewRegistry DO below,
+ * responding with { token }. Connecting a WebSocket to /view/<token> instead
+ * of /board/<board-id> resolves the token back to this board through that
+ * registry and joins read-only: the server tags the connection and silently
+ * drops any message from it that would mutate the board (see
+ * READ_ONLY_BLOCKED_TYPES in webSocketMessage below), independent of
+ * whatever the client-side UI does or doesn't show. The token is a separate
+ * secret from the board id -- unlike the board id itself, knowing it never
+ * lets you derive or recover the edit-capable board id, so sharing a
+ * read-only link doesn't hand out edit access the way sharing the board's
+ * own URL would.
  */
 
 interface Env {
   BOARD: DurableObjectNamespace<NotesBoard>;
+  REGISTRY: DurableObjectNamespace<ViewRegistry>;
   ANTHROPIC_API_KEY?: string;
 }
 
@@ -83,18 +97,41 @@ const ZONE_PREFIX = "zone:";
 const USER_PREFIX = "user:";
 const FIELDS_KEY = "schema:fields";
 const BACKGROUND_KEY = "schema:background";
+const VIEW_TOKEN_KEY = "meta:viewToken";
 const MAX_NOTES = 2000;
 const MAX_ZONES = 200;
 const MAX_USERS = 500;
 const VISION_DAILY_LIMIT = 30;
+// Message types a read-only ("view") connection is never allowed to send --
+// everything that would mutate shared board state. "cursor" and "identity"
+// are left out on purpose: a viewer's live cursor and self-reported
+// name/initials/color are harmless presence info, not board content.
+const READ_ONLY_BLOCKED_TYPES = new Set(["create", "move", "update", "delete", "clear", "fields", "background"]);
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 type Identity = { id: string } & Record<string, unknown>;
-type ConnAttachment = { id: string; identity?: Identity };
+type ConnAttachment = { id: string; identity?: Identity; readOnly?: boolean };
 type Note = { id: string } & Record<string, unknown>;
+
+/**
+ * A single global Durable Object (always addressed by the fixed name
+ * "global") mapping read-only view tokens to the board id they were minted
+ * for. Kept separate from NotesBoard because a token needs to be resolved
+ * to a board *before* we know which NotesBoard instance to talk to -- this
+ * is the only piece of shared state not scoped to one board.
+ */
+export class ViewRegistry extends DurableObject<Env> {
+  async register(token: string, boardId: string): Promise<void> {
+    await this.ctx.storage.put(token, boardId);
+  }
+
+  async resolve(token: string): Promise<string | undefined> {
+    return (await this.ctx.storage.get(token)) as string | undefined;
+  }
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -165,12 +202,16 @@ export class NotesBoard extends DurableObject<Env> {
     if (url.pathname.endsWith("/vision")) {
       return this.handleVision(request);
     }
+    if (url.pathname.endsWith("/view-link")) {
+      return this.handleViewLink(request);
+    }
 
+    const readOnly = url.searchParams.get("ro") === "1";
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
     const id = crypto.randomUUID();
-    server.serializeAttachment({ id } satisfies ConnAttachment);
+    server.serializeAttachment({ id, readOnly } satisfies ConnAttachment);
     this.ctx.acceptWebSocket(server);
 
     const [storedNotes, storedZones, fields, storedUsers, background] = await Promise.all([
@@ -239,6 +280,29 @@ export class NotesBoard extends DurableObject<Env> {
     }
   }
 
+  /** Mints (or returns the board's existing) read-only view token and
+   * records it in the ViewRegistry so /view/<token> can resolve back to
+   * this board. The token is stored on the board itself so repeated calls
+   * (e.g. re-opening the menu) return the same shareable link rather than
+   * minting a fresh one -- and, unlike a plain note or field, it survives
+   * "Clear Board", which only wipes notes. */
+  async handleViewLink(request: Request): Promise<Response> {
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
+    if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405);
+
+    const match = new URL(request.url).pathname.match(/^\/board\/([A-Za-z0-9_-]+)\/view-link$/);
+    if (!match) return jsonResponse({ error: "Malformed request." }, 400);
+    const boardId = match[1];
+
+    let token = (await this.ctx.storage.get(VIEW_TOKEN_KEY)) as string | undefined;
+    if (!token) {
+      token = crypto.randomUUID().replace(/-/g, "");
+      await this.ctx.storage.put(VIEW_TOKEN_KEY, token);
+    }
+    await this.env.REGISTRY.getByName("global").register(token, boardId);
+    return jsonResponse({ token });
+  }
+
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     if (typeof message !== "string") return;
     let data: Record<string, unknown>;
@@ -247,7 +311,8 @@ export class NotesBoard extends DurableObject<Env> {
     } catch {
       return;
     }
-    const { id: senderId } = (ws.deserializeAttachment() as ConnAttachment) || {};
+    const { id: senderId, readOnly } = (ws.deserializeAttachment() as ConnAttachment) || {};
+    if (readOnly && READ_ONLY_BLOCKED_TYPES.has(data.t as string)) return;
     data.from = senderId;
     const out = JSON.stringify(data);
     const noteId = typeof data.id === "string" ? data.id : null;
@@ -340,6 +405,28 @@ export default {
     if (visionMatch) {
       const stub = env.BOARD.getByName(visionMatch[1]);
       return stub.fetch(request);
+    }
+
+    const viewLinkMatch = url.pathname.match(/^\/board\/([A-Za-z0-9_-]+)\/view-link$/);
+    if (viewLinkMatch) {
+      const stub = env.BOARD.getByName(viewLinkMatch[1]);
+      return stub.fetch(request);
+    }
+
+    const viewMatch = url.pathname.match(/^\/view\/([A-Za-z0-9_-]+)$/);
+    if (viewMatch) {
+      if (request.headers.get("Upgrade") !== "websocket") {
+        return new Response("Sticky Notes realtime server. Connect via WebSocket to /view/<token>.", { status: 426 });
+      }
+      const boardId = await env.REGISTRY.getByName("global").resolve(viewMatch[1]);
+      if (!boardId) {
+        return new Response("This read-only link doesn't match any board.", { status: 404 });
+      }
+      const innerUrl = new URL(request.url);
+      innerUrl.pathname = `/board/${boardId}`;
+      innerUrl.searchParams.set("ro", "1");
+      const stub = env.BOARD.getByName(boardId);
+      return stub.fetch(new Request(innerUrl.toString(), request));
     }
 
     const wsMatch = url.pathname.match(/^\/board\/([A-Za-z0-9_-]+)$/);

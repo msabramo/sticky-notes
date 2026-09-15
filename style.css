@@ -1293,3 +1293,31 @@ body {
   .fab { width: 46px; height: 46px; font-size: 24px; }
   .fab-secondary { width: 40px; height: 40px; font-size: 18px; bottom: 70px; }
 }
+
+/* ---------- Read-only ("?view=<token>") mode ----------
+   Hides every control that mutates the board -- adding/deleting/editing
+   notes and zones, changing fields/background, clearing the board. Purely
+   cosmetic: the real enforcement is server-side (see READ_ONLY_BLOCKED_TYPES
+   in worker/index.ts), so nothing here is load-bearing for security, only
+   for a coherent read-only UI. */
+body.read-only .fab,
+body.read-only #bgMenuSection,
+body.read-only #zonesMenuSection,
+body.read-only #manageFieldsBtn,
+body.read-only #clearBtn,
+body.read-only #copyLinkBtn,
+body.read-only #copyViewLinkBtn,
+body.read-only .note-header button,
+body.read-only .note-resize,
+body.read-only .zone-del,
+body.read-only .zone-resize {
+  display: none !important;
+}
+
+body.read-only .zone-label {
+  pointer-events: none;
+}
+
+body.read-only .note-text {
+  cursor: default;
+}

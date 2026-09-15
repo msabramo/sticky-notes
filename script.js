@@ -20,6 +20,7 @@
   const createColumnsFromFieldBtn = document.getElementById("createColumnsFromFieldBtn");
   const drawZoneBtn = document.getElementById("drawZoneBtn");
   const copyLinkBtn = document.getElementById("copyLinkBtn");
+  const copyViewLinkBtn = document.getElementById("copyViewLinkBtn");
   const boardCodeEl = document.getElementById("boardCode");
   const connDot = document.getElementById("connDot");
   const colorPopover = document.getElementById("colorPopover");
@@ -56,6 +57,16 @@
   const identityColorRow = document.getElementById("identityColorRow");
   const presenceRow = document.getElementById("presenceRow");
   const bgSwatches = document.getElementById("bgSwatches");
+
+  // A "?view=<token>" URL joins read-only: see MP.viewLinkUrl/connect below
+  // for how the token maps to a board server-side, and the "body.read-only"
+  // rules in style.css for the UI this flag hides. Blocking edits is also
+  // enforced server-side (see worker/index.ts's READ_ONLY_BLOCKED_TYPES) --
+  // this flag just keeps the client from offering controls the server would
+  // reject anyway.
+  const VIEW_TOKEN = new URLSearchParams(location.search).get("view");
+  const READ_ONLY = !!VIEW_TOKEN;
+  if (READ_ONLY) document.body.classList.add("read-only");
 
   const WORLD_W = 3000;
   const WORLD_H = 2000;
@@ -632,6 +643,26 @@
     });
   }
 
+  if (copyViewLinkBtn) {
+    copyViewLinkBtn.addEventListener("click", async () => {
+      const original = copyViewLinkBtn.textContent;
+      copyViewLinkBtn.textContent = "…";
+      const url = await MP.viewLinkUrl();
+      copyViewLinkBtn.textContent = original;
+      if (!url) {
+        alert("Couldn't create a read-only link. Try again.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(url);
+        copyViewLinkBtn.textContent = "Copied!";
+        setTimeout(() => { copyViewLinkBtn.textContent = original; }, 1400);
+      } catch (err) {
+        prompt("Copy this read-only link to share:", url);
+      }
+    });
+  }
+
   clearBtn.addEventListener("click", () => {
     if (!confirm("Clear every note on this board for everyone? This can't be undone.")) return;
     clearAllNotes();
@@ -891,6 +922,7 @@
       // pointerdown handler below checks the same hit test and steps aside
       // for it instead of starting a note drag.
       editor.addEventListener("mousedown", (e) => {
+        if (READ_ONLY) return;
         const li = checklistCheckboxHit(e);
         if (!li || !editor.contains(li)) return;
         e.preventDefault();
@@ -1280,6 +1312,7 @@
   // the click that triggered edit mode rather than always at the start of
   // the text.
   function enterEditMode(id, clientX, clientY) {
+    if (READ_ONLY) return;
     selectNote(id);
     const refs = noteEls.get(id);
     if (!refs) return;
@@ -2850,6 +2883,7 @@
   });
 
   boardWrap.addEventListener("dblclick", (e) => {
+    if (READ_ONLY) return;
     if (isUiChrome(e.target) || e.target.closest(".note") || e.target.closest(".zone-header") || e.target.closest(".zone-resize")) return;
     const p = screenToWorld(e.clientX, e.clientY);
     addNote(p.x, p.y);
@@ -2949,6 +2983,15 @@
       return;
     }
     if (activePointers.size > 2) return;
+
+    // A read-only view still pans/zooms like any other visitor, but every
+    // note/zone drag, resize, and draw-a-zone branch below is a mutation --
+    // skip straight to the pan fallback instead of arming any of them.
+    if (READ_ONLY) {
+      panPointerId = e.pointerId;
+      panAnchorWorld = screenToWorld(e.clientX, e.clientY);
+      return;
+    }
 
     const resizeEl = e.target.closest(".note-resize");
     if (resizeEl) {
@@ -3256,6 +3299,24 @@
       return id;
     }
 
+    // Asks the worker to mint (or hand back the existing) read-only view
+    // token for this board and turns it into a shareable URL. Returns null
+    // if the worker host isn't configured or the request fails -- same
+    // condition connect() and visionUrl() check.
+    async function viewLinkUrl() {
+      const host = workerHost();
+      if (!host || host.includes("YOUR-")) return null;
+      try {
+        const res = await fetch(`${httpProtocolFor(host)}://${host}/board/${boardId}/view-link`, { method: "POST" });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data || typeof data.token !== "string") return null;
+        return `${location.origin}${location.pathname}?view=${data.token}`;
+      } catch (err) {
+        return null;
+      }
+    }
+
     function workerHost() {
       const host = location.hostname;
       if (host === "localhost" || host === "127.0.0.1") return "127.0.0.1:8787";
@@ -3306,7 +3367,7 @@
       }
       const proto = wsProtocolFor(host);
       setConnDot("connecting");
-      ws = new WebSocket(`${proto}://${host}/board/${boardId}`);
+      ws = new WebSocket(READ_ONLY ? `${proto}://${host}/view/${VIEW_TOKEN}` : `${proto}://${host}/board/${boardId}`);
       ws.onopen = () => {
         reconnectDelay = 1000;
         setConnDot("connected");
@@ -3484,6 +3545,11 @@
     }
 
     function send(obj) {
+      // Belt-and-suspenders alongside the UI-level guards above and the
+      // server's own READ_ONLY_BLOCKED_TYPES check: a read-only view never
+      // puts anything but a cursor position or a self-reported identity on
+      // the wire, no matter what triggered this call.
+      if (READ_ONLY && obj.t !== "cursor" && obj.t !== "identity") return;
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
     }
 
@@ -3500,8 +3566,12 @@
     }
 
     function init() {
-      boardId = resolveBoardId();
-      if (boardCodeEl) boardCodeEl.textContent = boardId;
+      if (READ_ONLY) {
+        if (boardCodeEl) boardCodeEl.textContent = "read-only";
+      } else {
+        boardId = resolveBoardId();
+        if (boardCodeEl) boardCodeEl.textContent = boardId;
+      }
       connect();
     }
 
@@ -3509,6 +3579,7 @@
       init,
       tick,
       visionUrl,
+      viewLinkUrl,
       sendCreate: (note) => send({ t: "create", ...note }),
       sendMove: (id, x, y, z) => send({ t: "move", id, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, z }),
       sendUpdate: (id, fields) => send({ t: "update", id, ...fields }),
