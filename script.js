@@ -79,6 +79,9 @@
   // pixel count, since note text is autofit-scaled anywhere from 13px to
   // 64px. Must match ul.checklist li's padding-left in style.css.
   const CHECKLIST_BOX_EM = 1.7;
+  // A pointerdown on a note that moves less than this before pointerup is a
+  // click, not a drag -- see the pointerdown/pointermove/pointerup handlers.
+  const CLICK_DRAG_THRESHOLD_PX = 4;
 
   // Real font names, mapped to a stack with sensible cross-platform fallbacks.
   // Also doubles as the allowlist the HTML sanitizer checks font-family values against.
@@ -718,6 +721,16 @@
     return "";
   }
 
+  // Shared by the editor's own mousedown listener (toggles the item) and the
+  // boardWrap pointerdown handler (which needs to *not* treat the same click
+  // as the start of a note drag) -- see their call sites.
+  function checklistCheckboxHit(e) {
+    const li = e.target.closest("li");
+    if (!li || !li.closest("ul.checklist")) return null;
+    const hitWidth = parseFloat(getComputedStyle(li).fontSize) * CHECKLIST_BOX_EM;
+    return e.offsetX >= 0 && e.offsetX < hitWidth ? li : null;
+  }
+
   function createNoteElement(note) {
     const el = document.createElement("div");
     el.className = "note";
@@ -748,7 +761,10 @@
 
     const editor = document.createElement("div");
     editor.className = "note-text";
-    editor.contentEditable = "true";
+    // Only editable in "edit mode" -- see enterEditMode/showFormatToolbarFor,
+    // which flip this to "true" and back. Until then the note is a drag
+    // target, not a text field (see the pointerdown handler further down).
+    editor.contentEditable = "false";
     editor.dataset.placeholder = "Type…";
     editor.spellcheck = false;
     editor.innerHTML = initialNoteHtml(note);
@@ -803,26 +819,19 @@
     // nothing for contenteditable to fight over -- clicking the rendered
     // checkbox (a ::before box drawn inside the <li>'s own CHECKLIST_BOX_EM
     // of left padding, matching the CSS, so offsetX there is never negative)
-    // just flips the attribute instead of placing a caret there. The hit
-    // width is computed from the li's current (autofit-scaled) font-size
-    // rather than a fixed pixel constant, since note text can render
-    // anywhere from 13px to 64px.
+    // just flips the attribute instead of placing a caret there. This works
+    // whether or not the note is in edit mode -- ticking off an item
+    // shouldn't require entering edit mode first -- so the boardWrap
+    // pointerdown handler below checks the same hit test and steps aside
+    // for it instead of starting a note drag.
     editor.addEventListener("mousedown", (e) => {
-      const li = e.target.closest("li");
-      if (!li || !li.closest("ul.checklist") || !editor.contains(li)) return;
-      const hitWidth = parseFloat(getComputedStyle(li).fontSize) * CHECKLIST_BOX_EM;
-      if (e.offsetX >= 0 && e.offsetX < hitWidth) {
-        e.preventDefault();
-        const checked = li.getAttribute("data-checked") === "true";
-        li.setAttribute("data-checked", checked ? "false" : "true");
-        sendHtmlUpdate(note.id);
-      }
+      const li = checklistCheckboxHit(e);
+      if (!li || !editor.contains(li)) return;
+      e.preventDefault();
+      const checked = li.getAttribute("data-checked") === "true";
+      li.setAttribute("data-checked", checked ? "false" : "true");
+      sendHtmlUpdate(note.id);
     });
-    // Double-clicking is how a note enters "edit mode" -- the only time its
-    // format toolbar appears (see enterEditMode). Merely hovering or
-    // single-clicking used to pop the toolbar too, which made it appear
-    // constantly while dragging notes around by their header.
-    editor.addEventListener("dblclick", () => enterEditMode(note.id));
 
     noteEls.set(note.id, { el, header, editor, colorBtn, fieldsRow });
     autofitNoteText(note.id);
@@ -864,7 +873,7 @@
     noteEls.delete(id);
     if (selectedId === id) selectedId = null;
     if (fieldsPopoverNoteId === id) closeNoteFieldsPopover();
-    if (formatTargetId === id) closeFormatToolbar();
+    if (editingNoteId === id || formatTargetId === id) exitEditMode(id);
   }
 
   function clearAllNotes() {
@@ -1183,18 +1192,65 @@
     bringToFront(id);
     if (noteEls.has(id)) noteEls.get(id).el.classList.add("selected");
     // Moving selection to a different note (a click, a drag, a resize) means
-    // we're no longer editing whatever note the toolbar was open for.
-    if (formatTargetId && formatTargetId !== id) closeFormatToolbar();
+    // we're no longer editing whatever note was previously being edited.
+    if (editingNoteId && editingNoteId !== id) exitEditMode(editingNoteId);
   }
 
-  // The only way into "edit mode": double-clicking a note's text (see the
-  // dblclick listener in createNoteElement). This is deliberately separate
-  // from selectNote/focus, which happen on plain single clicks too (for
-  // dragging, resizing, placing a caret to type) -- edit mode is reserved
-  // for when the user actually wants the format toolbar.
-  function enterEditMode(id) {
+  // The note currently in "edit mode": contentEditable, I-beam cursor,
+  // header (Color/Fields/Delete) visible -- see enterEditMode/exitEditMode.
+  // Kept separate from formatTargetId/the toolbar's own visibility, because
+  // opening the Color or Fields popover also hides the toolbar (to avoid
+  // overlapping it) without leaving edit mode itself -- the header those
+  // buttons live in needs to stay up while their popover is open.
+  let editingNoteId = null;
+
+  // The only way into "edit mode": clicking a note that's already selected,
+  // without dragging it (see the boardWrap pointerdown/pointerup handlers
+  // below). This is deliberately separate from selectNote, which also
+  // happens on the *first* click (for dragging, resizing) -- edit mode is
+  // reserved for when the user actually wants to type or see the format
+  // toolbar. clientX/clientY, when given, are used to land the caret under
+  // the click that triggered edit mode rather than always at the start of
+  // the text.
+  function enterEditMode(id, clientX, clientY) {
     selectNote(id);
+    const refs = noteEls.get(id);
+    if (!refs) return;
+    editingNoteId = id;
+    refs.el.classList.add("editing");
+    refs.editor.contentEditable = "true";
+    scheduleAutofit(id);
     showFormatToolbarFor(id);
+    refs.editor.focus();
+    if (typeof clientX !== "number") return;
+    const range =
+      document.caretRangeFromPoint
+        ? document.caretRangeFromPoint(clientX, clientY)
+        : document.caretPositionFromPoint
+        ? (() => {
+            const pos = document.caretPositionFromPoint(clientX, clientY);
+            if (!pos) return null;
+            const r = document.createRange();
+            r.setStart(pos.offsetNode, pos.offset);
+            r.collapse(true);
+            return r;
+          })()
+        : null;
+    if (range && refs.editor.contains(range.startContainer)) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
+  function exitEditMode(id) {
+    if (editingNoteId === id) editingNoteId = null;
+    if (formatTargetId === id) closeFormatToolbar();
+    const refs = noteEls.get(id);
+    if (!refs) return;
+    refs.el.classList.remove("editing");
+    refs.editor.contentEditable = "false";
+    scheduleAutofit(id);
   }
 
   function deselectNote() {
@@ -1203,7 +1259,7 @@
     }
     selectedId = null;
     closeColorPopover();
-    closeFormatToolbar();
+    if (editingNoteId) exitEditMode(editingNoteId);
     closeNoteFieldsPopover();
   }
 
@@ -1679,8 +1735,13 @@
   });
 
   // Shows the format toolbar for a note -- only ever called by enterEditMode
-  // (double-click), never by hover or plain selection, so it doesn't pop up
-  // while the user is just dragging notes around by their header.
+  // (clicking an already-selected note), never by hover or plain selection,
+  // so it doesn't pop up while the user is just dragging a note around.
+  // Only ever shown for the note currently being edited (editingNoteId), but
+  // gets hidden independently of edit mode itself -- e.g. while the Color or
+  // Fields popover is open, to avoid overlapping it (see openColorPopover/
+  // openNoteFieldsPopover) -- so it doesn't touch the `editing` class or
+  // contentEditable; that's enterEditMode/exitEditMode's job.
   function showFormatToolbarFor(id) {
     if (!noteEls.has(id)) return;
     if (formatTargetId === id && !formatToolbar.hidden) {
@@ -1791,6 +1852,11 @@
         name: f && typeof f.name === "string" && f.name.trim() ? f.name.slice(0, 60) : "Field",
         type,
         options: [],
+        // Whether this field's value shows as a chip on the note card itself
+        // (see renderNoteFieldRow), as opposed to only in the note's Fields
+        // popover -- off by default so a board with many fields doesn't
+        // clutter every card automatically.
+        showOnCard: !!(f && f.showOnCard),
       };
       if (FIELD_TYPES_WITH_OPTIONS.has(type) && f && Array.isArray(f.options)) {
         def.options = f.options.slice(0, 40).map((o) => ({
@@ -1893,6 +1959,7 @@
     const values = noteFieldValues(note);
     let any = false;
     for (const field of boardFields) {
+      if (!field.showOnCard) continue;
       const value = values[field.id];
       if (field.type === "checkbox") {
         if (!value) continue;
@@ -2254,6 +2321,19 @@
     top.appendChild(delBtn);
     row.appendChild(top);
 
+    const showOnCardRow = document.createElement("label");
+    showOnCardRow.className = "field-checkbox-row";
+    const showOnCardCb = document.createElement("input");
+    showOnCardCb.type = "checkbox";
+    showOnCardCb.checked = !!field.showOnCard;
+    showOnCardCb.addEventListener("change", () => {
+      field.showOnCard = showOnCardCb.checked;
+      commitFieldDefs();
+    });
+    showOnCardRow.appendChild(showOnCardCb);
+    showOnCardRow.appendChild(document.createTextNode(" Show on card"));
+    row.appendChild(showOnCardRow);
+
     if (FIELD_TYPES_WITH_OPTIONS.has(field.type)) row.appendChild(renderFieldOptionsEditor(field));
     if (field.type === "user") row.appendChild(renderUserFieldSettings(field));
 
@@ -2449,10 +2529,10 @@
     };
     addNoteLocally(note);
     MP.sendCreate(note);
-    // A blank note is created for immediate typing, so it should grab focus;
-    // a batch of notes from a photo scan shouldn't steal focus from any of them.
-    const refs = noteEls.get(id);
-    if (refs && !text) refs.editor.focus();
+    // A blank note is created for immediate typing, so it should go straight
+    // into edit mode; a batch of notes from a photo scan shouldn't steal
+    // focus/edit mode from any of them.
+    if (!text) enterEditMode(id);
     return id;
   }
 
@@ -2571,6 +2651,8 @@
   let dragNoteId = null;
   let dragOffset = null;
   let dragMoved = false; // whether a note drag actually relocated it -- a plain click shouldn't trigger zone snapping
+  let dragStartScreen = null; // screen coords at pointerdown, for the click-vs-drag threshold
+  let dragEnterEditOnClick = false; // pointerdown landed on an already-selected, not-yet-editing note -- a plain click (no drag) enters edit mode
   let lastMoveSent = 0;
   let resizePointerId = null;
   let resizeNoteId = null;
@@ -2616,6 +2698,8 @@
     dragPointerId = null;
     dragOffset = null;
     dragMoved = false;
+    dragStartScreen = null;
+    dragEnterEditOnClick = false;
     panPointerId = null;
     panAnchorWorld = null;
     resizeNoteId = null;
@@ -2648,22 +2732,6 @@
     }
     if (activePointers.size > 2) return;
 
-    const headerEl = e.target.closest(".note-header");
-    if (headerEl && !e.target.closest("button")) {
-      const noteEl = headerEl.closest(".note");
-      const id = noteEl.dataset.id;
-      const note = notes.get(id);
-      if (!note) return;
-      selectNote(id);
-      const world = screenToWorld(e.clientX, e.clientY);
-      dragOffset = { x: world.x - note.x, y: world.y - note.y };
-      dragNoteId = id;
-      dragPointerId = e.pointerId;
-      dragMoved = false;
-      e.preventDefault();
-      return;
-    }
-
     const resizeEl = e.target.closest(".note-resize");
     if (resizeEl) {
       const noteEl = resizeEl.closest(".note");
@@ -2679,7 +2747,41 @@
       return;
     }
 
-    if (e.target.closest(".note")) return; // let the editor/buttons handle it natively
+    // A note in edit mode only drags from its header (visible while editing
+    // -- see the .editing CSS); everywhere else in it is native
+    // contentEditable territory, left to the editor itself. A note that
+    // isn't being edited has no header to grab, so the whole note is the
+    // drag target instead -- except a checklist checkbox hit, which the
+    // editor's own mousedown listener needs to toggle instead of the note
+    // starting a drag. Either way this only *arms* a drag; the
+    // pointermove/pointerup handlers below decide whether the pointer
+    // actually moved enough to count as one, or whether it was a plain
+    // click (which selects the note, and enters edit mode if it was
+    // already selected -- see dragEnterEditOnClick).
+    const noteHit = e.target.closest(".note");
+    if (noteHit) {
+      const id = noteHit.dataset.id;
+      const note = notes.get(id);
+      if (!note) return;
+      const editing = editingNoteId === id;
+      if (editing) {
+        const headerEl = e.target.closest(".note-header");
+        if (!headerEl || e.target.closest("button")) return;
+      } else if (checklistCheckboxHit(e)) {
+        return;
+      }
+      const wasAlreadySelected = selectedId === id;
+      selectNote(id);
+      const world = screenToWorld(e.clientX, e.clientY);
+      dragOffset = { x: world.x - note.x, y: world.y - note.y };
+      dragNoteId = id;
+      dragPointerId = e.pointerId;
+      dragMoved = false;
+      dragStartScreen = { x: e.clientX, y: e.clientY };
+      dragEnterEditOnClick = !editing && wasAlreadySelected;
+      e.preventDefault();
+      return;
+    }
 
     const zoneHeaderEl = e.target.closest(".zone-header");
     if (zoneHeaderEl && !e.target.closest("button") && !e.target.closest(".zone-label")) {
@@ -2741,10 +2843,15 @@
     if (dragNoteId && e.pointerId === dragPointerId) {
       const note = notes.get(dragNoteId);
       if (!note) return;
+      if (!dragMoved) {
+        if (pointDist({ x: e.clientX, y: e.clientY }, dragStartScreen) < CLICK_DRAG_THRESHOLD_PX) return;
+        dragMoved = true;
+        const refs = noteEls.get(dragNoteId);
+        if (refs) refs.el.classList.add("dragging");
+      }
       const world = screenToWorld(e.clientX, e.clientY);
       note.x = world.x - dragOffset.x;
       note.y = world.y - dragOffset.y;
-      dragMoved = true;
       positionNoteEl(dragNoteId);
       const now = performance.now();
       if (now - lastMoveSent > 60) {
@@ -2842,13 +2949,21 @@
     if (dragNoteId && e.pointerId === dragPointerId) {
       const note = notes.get(dragNoteId);
       if (note) {
-        if (dragMoved) finalizeNoteDrop(dragNoteId, e.altKey);
-        else MP.sendMove(dragNoteId, note.x, note.y, note.z);
+        if (dragMoved) {
+          finalizeNoteDrop(dragNoteId, e.altKey);
+        } else {
+          MP.sendMove(dragNoteId, note.x, note.y, note.z);
+          if (dragEnterEditOnClick) enterEditMode(dragNoteId, e.clientX, e.clientY);
+        }
       }
+      const refs = noteEls.get(dragNoteId);
+      if (refs) refs.el.classList.remove("dragging");
       dragNoteId = null;
       dragPointerId = null;
       dragOffset = null;
       dragMoved = false;
+      dragStartScreen = null;
+      dragEnterEditOnClick = false;
     }
     if (resizeNoteId && e.pointerId === resizePointerId) {
       const note = notes.get(resizeNoteId);
