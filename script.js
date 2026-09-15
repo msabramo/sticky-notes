@@ -71,7 +71,10 @@
   const ZONE_HEADER_H = 30; // px, must match .zone-header's CSS height
   const ZONE_STACK_MARGIN = 14; // gap between a zone's edge and the notes stacked inside it
   const ZONE_STACK_GAP = 12; // gap between consecutively stacked notes
-  const COLORS = ["#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8"];
+  const COLORS = [
+    "#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8",
+    "#ffffff", "#f7f5f0", "#f2e2c4", "#e8d0a0", "#fbe0e6", "#f5c6d3",
+  ];
   const CURSOR_COLORS = ["#ff6b3d", "#4dd0e1", "#ff4d4f", "#8bc34a", "#ba68c8", "#ffd54f"];
   // How far into a checklist <li>'s left padding (where its CSS-drawn
   // checkbox lives, in style.css) a click still counts as toggling the box
@@ -615,7 +618,7 @@
   // Like the custom fields schema, the chosen background is board-wide state
   // synced to every peer (see MP.sendBackground / the "background" message)
   // rather than a per-viewer preference, so everyone sees the same board.
-  const BOARD_BACKGROUNDS = ["grid", "whiteboard", "chalkboard", "pinboard"];
+  const BOARD_BACKGROUNDS = ["grid", "whiteboard", "snow", "linen", "blush", "chalkboard", "pinboard"];
   let boardBackground = "grid";
 
   function normalizeBackground(bg) {
