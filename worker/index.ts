@@ -109,7 +109,7 @@ const VISION_DAILY_LIMIT = 30;
 const READ_ONLY_BLOCKED_TYPES = new Set(["create", "move", "update", "delete", "clear", "fields", "background"]);
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 type Identity = { id: string } & Record<string, unknown>;
@@ -130,6 +130,10 @@ export class ViewRegistry extends DurableObject<Env> {
 
   async resolve(token: string): Promise<string | undefined> {
     return (await this.ctx.storage.get(token)) as string | undefined;
+  }
+
+  async unregister(token: string): Promise<void> {
+    await this.ctx.storage.delete(token);
   }
 }
 
@@ -288,6 +292,7 @@ export class NotesBoard extends DurableObject<Env> {
    * "Clear Board", which only wipes notes. */
   async handleViewLink(request: Request): Promise<Response> {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
+    if (request.method === "DELETE") return this.handleViewLinkRevoke();
     if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405);
 
     const match = new URL(request.url).pathname.match(/^\/board\/([A-Za-z0-9_-]+)\/view-link$/);
@@ -301,6 +306,30 @@ export class NotesBoard extends DurableObject<Env> {
     }
     await this.env.REGISTRY.getByName("global").register(token, boardId);
     return jsonResponse({ token });
+  }
+
+  /** Un-mints this board's read-only view token, if it has one: forgets it
+   * from the ViewRegistry (so /view/<old-token> immediately 404s, and can
+   * never be reused even if the same token were somehow minted again) and
+   * drops any already-connected read-only sockets, so a revoke also
+   * disconnects anyone currently watching rather than just blocking new
+   * joins. The next "Copy Read-only Link" mints an unrelated fresh token. */
+  async handleViewLinkRevoke(): Promise<Response> {
+    const token = (await this.ctx.storage.get(VIEW_TOKEN_KEY)) as string | undefined;
+    if (token) {
+      await this.ctx.storage.delete(VIEW_TOKEN_KEY);
+      await this.env.REGISTRY.getByName("global").unregister(token);
+    }
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as ConnAttachment | null;
+      if (!att || !att.readOnly) continue;
+      try {
+        ws.close(1000, "Read-only link revoked.");
+      } catch {
+        // Already closing/closed -- nothing to do.
+      }
+    }
+    return jsonResponse({ ok: true });
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {

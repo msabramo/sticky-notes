@@ -127,9 +127,11 @@ same coordinate space, so notes always line up between devices.
   board's own id: it's a separate, unguessable token the server resolves
   back to the board on the way in, so there's no query string to edit or
   strip to regain edit access. The same link is returned every time you tap
-  the button, so it's safe to generate once and reuse. There's currently no
-  way to revoke a read-only link once it's been shared, short of clearing
-  and rebuilding the board's contents on a fresh board id.
+  the button, so it's safe to generate once and reuse. **Revoke Read-only
+  Link**, right below it, immediately disconnects anyone currently using
+  that link and invalidates it -- the next **Copy Read-only Link** hands
+  out an unrelated new one, so a leaked link can be cut off without
+  touching the board's own contents or its edit link.
 - **Delete** — tap the × button in a note's header.
 - **Photo to notes** — tap 📷 (bottom-left, above **+**) to snap or pick a
   photo of a handwritten or printed to-do list; each item it finds
@@ -198,6 +200,12 @@ background) before it's ever stored or broadcast, regardless of what the
 sending client's own UI does or doesn't allow -- the frontend also hides
 every editing control in this mode, but that's a UI nicety on top of, not a
 substitute for, the server-side check.
+
+`DELETE /board/<board-id>/view-link` revokes the board's current token, if
+it has one: `ViewRegistry` forgets it (so `/view/<old-token>` 404s on the
+very next request) and any already-connected read-only sockets are closed
+server-side via `ctx.getWebSockets()`, so a revoke disconnects existing
+viewers rather than only blocking new ones from joining.
 
 ### Photo-to-notes (Claude vision)
 

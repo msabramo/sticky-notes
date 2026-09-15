@@ -21,6 +21,7 @@
   const drawZoneBtn = document.getElementById("drawZoneBtn");
   const copyLinkBtn = document.getElementById("copyLinkBtn");
   const copyViewLinkBtn = document.getElementById("copyViewLinkBtn");
+  const revokeViewLinkBtn = document.getElementById("revokeViewLinkBtn");
   const boardCodeEl = document.getElementById("boardCode");
   const connDot = document.getElementById("connDot");
   const colorPopover = document.getElementById("colorPopover");
@@ -660,6 +661,17 @@
       } catch (err) {
         prompt("Copy this read-only link to share:", url);
       }
+    });
+  }
+
+  if (revokeViewLinkBtn) {
+    revokeViewLinkBtn.addEventListener("click", async () => {
+      if (!confirm("Revoke this board's read-only link? Anyone currently viewing it will be disconnected, and the link will stop working.")) return;
+      const original = revokeViewLinkBtn.textContent;
+      revokeViewLinkBtn.textContent = "…";
+      const ok = await MP.revokeViewLink();
+      revokeViewLinkBtn.textContent = original;
+      if (!ok) alert("Couldn't revoke the read-only link. Try again.");
     });
   }
 
@@ -3317,6 +3329,22 @@
       }
     }
 
+    // Un-mints this board's read-only view token (if it has one): the
+    // server both forgets it (so shared links stop resolving) and drops
+    // any read-only socket already connected with it. Returns false only on
+    // a network/request failure -- there being no token to revoke yet still
+    // counts as success, same as viewLinkUrl minting one lazily on first use.
+    async function revokeViewLink() {
+      const host = workerHost();
+      if (!host || host.includes("YOUR-")) return false;
+      try {
+        const res = await fetch(`${httpProtocolFor(host)}://${host}/board/${boardId}/view-link`, { method: "DELETE" });
+        return res.ok;
+      } catch (err) {
+        return false;
+      }
+    }
+
     function workerHost() {
       const host = location.hostname;
       if (host === "localhost" || host === "127.0.0.1") return "127.0.0.1:8787";
@@ -3373,10 +3401,18 @@
         setConnDot("connected");
         sendIdentity();
       };
-      ws.onclose = () => {
-        setConnDot("disconnected");
+      ws.onclose = (e) => {
         onlineConnToUser.clear();
         renderPresenceRow();
+        // A deliberate server-initiated close (clean code + a reason string)
+        // while viewing read-only means the link was just revoked -- a
+        // fresh /view/<token> handshake would only 404, so don't loop
+        // reconnect attempts against a link that's gone for good.
+        if (READ_ONLY && e.code === 1000 && e.reason) {
+          setConnDot("disconnected", e.reason);
+          return;
+        }
+        setConnDot("disconnected");
         scheduleReconnect();
       };
       ws.onerror = () => {
@@ -3580,6 +3616,7 @@
       tick,
       visionUrl,
       viewLinkUrl,
+      revokeViewLink,
       sendCreate: (note) => send({ t: "create", ...note }),
       sendMove: (id, x, y, z) => send({ t: "move", id, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, z }),
       sendUpdate: (id, fields) => send({ t: "update", id, ...fields }),
