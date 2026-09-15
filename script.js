@@ -1484,10 +1484,22 @@
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
     const range = sel.getRangeAt(0);
-    if (range.collapsed) return;
     const container = range.commonAncestorContainer;
     const el = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
     const editorEl = el && el.closest(".note-text");
+    // Keep the toolbar's button/select state in sync with wherever the
+    // caret or selection actually is -- otherwise it keeps showing
+    // whatever state was true the last time a command ran, even after the
+    // user has since clicked or arrow-keyed somewhere else entirely.
+    if (
+      editorEl &&
+      formatTargetId &&
+      !formatToolbar.hidden &&
+      editorEl.closest(".note").dataset.id === formatTargetId
+    ) {
+      refreshToolbarState();
+    }
+    if (range.collapsed) return;
     if (!editorEl) return;
     savedRange = range.cloneRange();
     savedRangeNoteId = editorEl.closest(".note").dataset.id;
@@ -1539,9 +1551,43 @@
     return el && editor.contains(el) ? el.closest("li") : null;
   }
 
+  // Walks up from the current selection's start to the nearest ancestor
+  // (stopping at, and excluding, `editor` itself) carrying an inline
+  // `styleProp` -- used to find the font-family/font-size span the toolbar
+  // command created, since execCommand's own queryCommandValue doesn't know
+  // about the <span style> markup applyFontFamily/applyFontSize produce.
+  // Excluding the editor matters because autofitNoteText sets an inline
+  // font-size on the editor itself for display scaling, which has nothing
+  // to do with any explicit per-text size the user picked.
+  function selectionInlineStyle(editor, styleProp) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    const node = sel.getRangeAt(0).startContainer;
+    let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    if (!el || !editor.contains(el)) return null;
+    while (el && el !== editor) {
+      if (el.style && el.style[styleProp]) return el.style[styleProp];
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  // Matches a CSS font-family value back to one of FONT_OPTIONS, tolerating
+  // whatever quote/whitespace normalization the browser's CSSOM applies when
+  // a style property set with e.g. `"Caveat", ...` is read back.
+  function fontOptionFor(cssValue) {
+    if (!cssValue) return FONT_OPTIONS[0];
+    const norm = (s) => s.replace(/["']/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+    const target = norm(cssValue);
+    return FONT_OPTIONS.find((f) => norm(f.value) === target) || FONT_OPTIONS[0];
+  }
+
   function refreshToolbarState() {
     const editor = formatEditor();
     if (!editor) return;
+    fmtFontSelect.value = fontOptionFor(selectionInlineStyle(editor, "fontFamily")).value;
+    const sizePx = parseInt(selectionInlineStyle(editor, "fontSize"), 10);
+    fmtSizeSelect.value = String(SIZE_OPTIONS.includes(sizePx) ? sizePx : DEFAULT_FONT_SIZE);
     fmtBoldBtn.classList.toggle("active", document.queryCommandState("bold"));
     fmtItalicBtn.classList.toggle("active", document.queryCommandState("italic"));
     fmtUnderlineBtn.classList.toggle("active", document.queryCommandState("underline"));
