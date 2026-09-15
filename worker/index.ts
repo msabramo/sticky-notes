@@ -32,8 +32,8 @@ import { DurableObject } from "cloudflare:workers";
  *     field schema (an array the client defines: name/type/options per
  *     field). Stored separately from notes so "clear" (which only wipes
  *     notes) leaves field definitions in place. A new connection receives
- *     the current schema alongside note history: { t: "history", notes,
- *     fields, users, online, background }.
+ *     the current schema alongside note (and zone) history: { t: "history",
+ *     notes, zones, fields, users, online, background }.
  *   identity: { t: "identity", id, name, initials, color } -- a per-browser
  *     display identity (see script.js), not an account: no password, no
  *     server-side verification, just whatever the sending client claims.
@@ -53,6 +53,16 @@ import { DurableObject } from "cloudflare:workers";
  *     "pinboard", opaque to the server). Stored like `fields`, separately
  *     from notes, and included in the history payload as `background`.
  *
+ * Zones (labeled rectangular regions, e.g. kanban columns) reuse the same
+ * create/move/update/delete verbs with `kind: "zone"` added, so they're
+ * stored and broadcast the same way but under their own key prefix and
+ * their own history list ("zones" alongside "notes") -- and, unlike
+ * "clear", they aren't touched by a plain notes-only clear.
+ *   create: { t: "create", kind: "zone", id, x, y, w, h, label }
+ *   move:   { t: "move", kind: "zone", id, x, y }
+ *   update: { t: "update", kind: "zone", id, x?, y?, w?, h?, label? }
+ *   delete: { t: "delete", kind: "zone", id }
+ *
  * POST /board/<board-id>/vision is a separate, non-websocket endpoint: send
  * { image: "data:image/...;base64,..." } and get back { items: string[] }
  * extracted from a photo of a to-do list via the Anthropic API. It's gated
@@ -69,10 +79,12 @@ interface Env {
 }
 
 const NOTE_PREFIX = "note:";
+const ZONE_PREFIX = "zone:";
 const USER_PREFIX = "user:";
 const FIELDS_KEY = "schema:fields";
 const BACKGROUND_KEY = "schema:background";
 const MAX_NOTES = 2000;
+const MAX_ZONES = 200;
 const MAX_USERS = 500;
 const VISION_DAILY_LIMIT = 30;
 const CORS_HEADERS: Record<string, string> = {
@@ -161,10 +173,15 @@ export class NotesBoard extends DurableObject<Env> {
     server.serializeAttachment({ id } satisfies ConnAttachment);
     this.ctx.acceptWebSocket(server);
 
-    const stored = await this.ctx.storage.list({ prefix: NOTE_PREFIX });
-    const notes = [...stored.values()];
-    const fields = (await this.ctx.storage.get(FIELDS_KEY)) as unknown[] | undefined;
-    const storedUsers = await this.ctx.storage.list({ prefix: USER_PREFIX });
+    const [storedNotes, storedZones, fields, storedUsers, background] = await Promise.all([
+      this.ctx.storage.list({ prefix: NOTE_PREFIX }),
+      this.ctx.storage.list({ prefix: ZONE_PREFIX }),
+      this.ctx.storage.get(FIELDS_KEY) as Promise<unknown[] | undefined>,
+      this.ctx.storage.list({ prefix: USER_PREFIX }),
+      this.ctx.storage.get(BACKGROUND_KEY) as Promise<string | undefined>,
+    ]);
+    const notes = [...storedNotes.values()];
+    const zones = [...storedZones.values()];
     const users = [...storedUsers.values()];
     const online = this.ctx
       .getWebSockets()
@@ -173,9 +190,16 @@ export class NotesBoard extends DurableObject<Env> {
         return att && att.identity ? { ...att.identity, connId: att.id } : null;
       })
       .filter(Boolean);
-    const background = (await this.ctx.storage.get(BACKGROUND_KEY)) as string | undefined;
     server.send(
-      JSON.stringify({ t: "history", notes, fields: fields || [], users, online, background: background || "grid" })
+      JSON.stringify({
+        t: "history",
+        notes,
+        zones,
+        fields: fields || [],
+        users,
+        online,
+        background: background || "grid",
+      })
     );
 
     return new Response(null, { status: 101, webSocket: client });
@@ -227,29 +251,32 @@ export class NotesBoard extends DurableObject<Env> {
     data.from = senderId;
     const out = JSON.stringify(data);
     const noteId = typeof data.id === "string" ? data.id : null;
+    const isZone = data.kind === "zone";
+    const prefix = isZone ? ZONE_PREFIX : NOTE_PREFIX;
+    const maxCount = isZone ? MAX_ZONES : MAX_NOTES;
 
     switch (data.t) {
       case "create": {
         if (!noteId) return;
-        const count = (await this.ctx.storage.list({ prefix: NOTE_PREFIX })).size;
-        if (count >= MAX_NOTES) return;
-        await this.ctx.storage.put(NOTE_PREFIX + noteId, data as Note);
+        const count = (await this.ctx.storage.list({ prefix })).size;
+        if (count >= maxCount) return;
+        await this.ctx.storage.put(prefix + noteId, data as Note);
         this.broadcast(out, senderId);
         break;
       }
       case "move":
       case "update": {
         if (!noteId) return;
-        const existing = (await this.ctx.storage.get(NOTE_PREFIX + noteId)) as Note | undefined;
+        const existing = (await this.ctx.storage.get(prefix + noteId)) as Note | undefined;
         if (!existing) return;
         const merged = { ...existing, ...data };
-        await this.ctx.storage.put(NOTE_PREFIX + noteId, merged);
+        await this.ctx.storage.put(prefix + noteId, merged);
         this.broadcast(out, senderId);
         break;
       }
       case "delete": {
         if (!noteId) return;
-        await this.ctx.storage.delete(NOTE_PREFIX + noteId);
+        await this.ctx.storage.delete(prefix + noteId);
         this.broadcast(out, senderId);
         break;
       }

@@ -16,6 +16,9 @@
   const menuDrawer = document.getElementById("menuDrawer");
   const menuBackdrop = document.getElementById("menuBackdrop");
   const clearBtn = document.getElementById("clearBtn");
+  const createColumnsBtn = document.getElementById("createColumnsBtn");
+  const createColumnsFromFieldBtn = document.getElementById("createColumnsFromFieldBtn");
+  const drawZoneBtn = document.getElementById("drawZoneBtn");
   const copyLinkBtn = document.getElementById("copyLinkBtn");
   const boardCodeEl = document.getElementById("boardCode");
   const connDot = document.getElementById("connDot");
@@ -64,7 +67,16 @@
   const MIN_NOTE_H = 100;
   const MAX_NOTE_W = 640;
   const MAX_NOTE_H = 560;
-  const COLORS = ["#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8"];
+  const MIN_ZONE_W = 100;
+  const MIN_ZONE_H = 80;
+  const ZONE_LABEL_MAX_LEN = 80;
+  const ZONE_HEADER_H = 30; // px, must match .zone-header's CSS height
+  const ZONE_STACK_MARGIN = 14; // gap between a zone's edge and the notes stacked inside it
+  const ZONE_STACK_GAP = 12; // gap between consecutively stacked notes
+  const COLORS = [
+    "#fff59d", "#ffab91", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8",
+    "#ffffff", "#f7f5f0", "#f2e2c4", "#e8d0a0", "#fbe0e6", "#f5c6d3",
+  ];
   const CURSOR_COLORS = ["#ff6b3d", "#4dd0e1", "#ff4d4f", "#8bc34a", "#ba68c8", "#ffd54f"];
   // How far into a checklist <li>'s left padding (where its CSS-drawn
   // checkbox lives, in style.css) a click still counts as toggling the box
@@ -72,6 +84,9 @@
   // pixel count, since note text is autofit-scaled anywhere from 13px to
   // 64px. Must match ul.checklist li's padding-left in style.css.
   const CHECKLIST_BOX_EM = 1.7;
+  // A pointerdown on a note that moves less than this before pointerup is a
+  // click, not a drag -- see the pointerdown/pointermove/pointerup handlers.
+  const CLICK_DRAG_THRESHOLD_PX = 4;
 
   // Real font names, mapped to a stack with sensible cross-platform fallbacks.
   // Also doubles as the allowlist the HTML sanitizer checks font-family values against.
@@ -613,7 +628,11 @@
   // Like the custom fields schema, the chosen background is board-wide state
   // synced to every peer (see MP.sendBackground / the "background" message)
   // rather than a per-viewer preference, so everyone sees the same board.
-  const BOARD_BACKGROUNDS = ["grid", "whiteboard", "chalkboard", "pinboard"];
+  const BOARD_BACKGROUNDS = [
+    "grid", "whiteboard", "snow", "linen", "blush",
+    "plain-white", "plain-tan", "plain-pink",
+    "chalkboard", "pinboard",
+  ];
   let boardBackground = "grid";
 
   function normalizeBackground(bg) {
@@ -646,6 +665,67 @@
 
   applyBoardBackground(boardBackground);
 
+  // Lays out `count` equal-width columns spanning the whole board, used by
+  // both "Create Columns..." (arbitrary names) and "Create Columns from
+  // Field..." (one column per select-field option) below.
+  function layoutEqualColumns(count) {
+    const margin = 24;
+    const gap = 16;
+    const w = (WORLD_W - margin * 2 - gap * (count - 1)) / count;
+    const h = WORLD_H - margin * 2;
+    return Array.from({ length: count }, (_, i) => ({ x: margin + i * (w + gap), y: margin, w, h }));
+  }
+
+  createColumnsBtn.addEventListener("click", () => {
+    closeMenu();
+    const input = prompt("Enter column names, separated by commas:", "To do, In progress, Done");
+    if (!input) return;
+    const names = input.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10);
+    if (names.length < 2) {
+      alert("Enter at least 2 column names, separated by commas.");
+      return;
+    }
+    const cols = layoutEqualColumns(names.length);
+    names.forEach((name, i) => addZone(cols[i].x, cols[i].y, cols[i].w, cols[i].h, name));
+  });
+
+  // One column per option of an existing single-select field (e.g.
+  // "Assignee" or "Status"), each linked to that option -- dropping a note
+  // into one sets the note's field value to match, and changing the field
+  // value on a note moves it into the matching column (see
+  // syncNoteFieldToZone / syncZonePositionToField).
+  createColumnsFromFieldBtn.addEventListener("click", () => {
+    closeMenu();
+    const selectFields = boardFields.filter((f) => f.type === "select" && f.options.length);
+    if (!selectFields.length) {
+      alert(
+        'No single-select fields with options yet. Add one from the menu → Manage Fields first (e.g. the "Status" preset).'
+      );
+      return;
+    }
+    let field = selectFields[0];
+    if (selectFields.length > 1) {
+      const listText = selectFields.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+      const input = prompt(`Create one column per option of which field?\n${listText}`, "1");
+      if (input === null) return;
+      field = selectFields[parseInt(input, 10) - 1];
+      if (!field) {
+        alert("Not a valid field number.");
+        return;
+      }
+    }
+    const cols = layoutEqualColumns(field.options.length);
+    field.options.forEach((opt, i) => {
+      addZone(cols[i].x, cols[i].y, cols[i].w, cols[i].h, opt.label, { fieldId: field.id, optionId: opt.id });
+    });
+  });
+
+  drawZoneBtn.addEventListener("click", () => {
+    closeMenu();
+    drawZoneMode = true;
+    boardWrap.classList.add("drawing-zone");
+  });
+
   // ---------- Notes state ----------
   const notes = new Map(); // id -> {id,x,y,w,h,color,html,rot,z}
   const noteEls = new Map(); // id -> {el, header, editor, colorBtn}
@@ -656,6 +736,16 @@
     if (typeof note.html === "string") return sanitizeHtml(note.html);
     if (typeof note.text === "string") return legacyTextToHtml(note.text); // pre-rich-text notes
     return "";
+  }
+
+  // Shared by the editor's own mousedown listener (toggles the item) and the
+  // boardWrap pointerdown handler (which needs to *not* treat the same click
+  // as the start of a note drag) -- see their call sites.
+  function checklistCheckboxHit(e) {
+    const li = e.target.closest("li");
+    if (!li || !li.closest("ul.checklist")) return null;
+    const hitWidth = parseFloat(getComputedStyle(li).fontSize) * CHECKLIST_BOX_EM;
+    return e.offsetX >= 0 && e.offsetX < hitWidth ? li : null;
   }
 
   function createNoteElement(note) {
@@ -699,8 +789,8 @@
     // An image note swaps the contenteditable text body for a plain <img>
     // that fills the note's whole box (see .note-image/.note-bare in
     // style.css) -- everything else about it (drag/resize/rotate/z-order/
-    // delete/fields, and realtime sync of its position) is the same generic
-    // note machinery a text note uses.
+    // delete/fields, edit-mode header, and realtime sync of its position)
+    // is the same generic note machinery a text note uses.
     let editor = null;
     let img = null;
     if (isImage) {
@@ -712,7 +802,10 @@
     } else {
       editor = document.createElement("div");
       editor.className = "note-text";
-      editor.contentEditable = "true";
+      // Only editable in "edit mode" -- see enterEditMode/showFormatToolbarFor,
+      // which flip this to "true" and back. Until then the note is a drag
+      // target, not a text field (see the pointerdown handler further down).
+      editor.contentEditable = "false";
       editor.dataset.placeholder = "Type…";
       editor.spellcheck = false;
       editor.innerHTML = initialNoteHtml(note);
@@ -749,9 +842,9 @@
         e.stopPropagation();
         replaceNoteImage(note.id);
       });
-      // There's no focusable/editable child to select the note the way a
-      // text note's editor does on focus, so the image itself does it.
-      img.addEventListener("pointerdown", () => selectNote(note.id));
+      // No focus-based selection to wire up here (there's no editable
+      // child) -- the boardWrap pointerdown handler below already selects
+      // any note, image or text, on click.
     } else {
       let debounceTimer = null;
       editor.addEventListener("focus", () => selectNote(note.id));
@@ -777,32 +870,20 @@
       // nothing for contenteditable to fight over -- clicking the rendered
       // checkbox (a ::before box drawn inside the <li>'s own CHECKLIST_BOX_EM
       // of left padding, matching the CSS, so offsetX there is never negative)
-      // just flips the attribute instead of placing a caret there. The hit
-      // width is computed from the li's current (autofit-scaled) font-size
-      // rather than a fixed pixel constant, since note text can render
-      // anywhere from 13px to 64px.
+      // just flips the attribute instead of placing a caret there. This works
+      // whether or not the note is in edit mode -- ticking off an item
+      // shouldn't require entering edit mode first -- so the boardWrap
+      // pointerdown handler below checks the same hit test and steps aside
+      // for it instead of starting a note drag.
       editor.addEventListener("mousedown", (e) => {
-        const li = e.target.closest("li");
-        if (!li || !li.closest("ul.checklist") || !editor.contains(li)) return;
-        const hitWidth = parseFloat(getComputedStyle(li).fontSize) * CHECKLIST_BOX_EM;
-        if (e.offsetX >= 0 && e.offsetX < hitWidth) {
-          e.preventDefault();
-          const checked = li.getAttribute("data-checked") === "true";
-          li.setAttribute("data-checked", checked ? "false" : "true");
-          sendHtmlUpdate(note.id);
-        }
+        const li = checklistCheckboxHit(e);
+        if (!li || !editor.contains(li)) return;
+        e.preventDefault();
+        const checked = li.getAttribute("data-checked") === "true";
+        li.setAttribute("data-checked", checked ? "false" : "true");
+        sendHtmlUpdate(note.id);
       });
     }
-    el.addEventListener("pointerenter", (e) => {
-      if (e.pointerType !== "mouse") return;
-      hoverNoteId = note.id;
-      showFormatToolbarFor(note.id);
-    });
-    el.addEventListener("pointerleave", (e) => {
-      if (e.pointerType !== "mouse") return;
-      if (hoverNoteId === note.id) hoverNoteId = null;
-      scheduleFormatToolbarHideCheck();
-    });
 
     noteEls.set(note.id, { el, header, editor, colorBtn, fieldsRow, img });
     if (!isImage) autofitNoteText(note.id);
@@ -844,10 +925,315 @@
     noteEls.delete(id);
     if (selectedId === id) selectedId = null;
     if (fieldsPopoverNoteId === id) closeNoteFieldsPopover();
+    if (editingNoteId === id || formatTargetId === id) exitEditMode(id);
   }
 
   function clearAllNotes() {
     for (const id of [...notes.keys()]) deleteNote(id);
+  }
+
+  // ---------- Zones (columns / custom regions) ----------
+  // A zone is a labeled rectangle drawn behind the notes. Most zones are
+  // purely a visual aid -- nothing tracks which notes are "inside" one.
+  // A zone created via "Create Columns from Field" is the exception: it
+  // carries fieldId/optionId tying it to one option of a board select
+  // field, and note<->zone membership is kept in sync bidirectionally (see
+  // syncNoteFieldToZone / syncZonePositionToField below) by matching each
+  // note's *current position* against zone rectangles on demand -- there's
+  // still no persisted note->zone link, so this only reconciles on a drag
+  // drop or a field-value edit, not continuously.
+  const zones = new Map(); // id -> {id,x,y,w,h,label,fieldId?,optionId?}
+  const zoneEls = new Map(); // id -> {el, header, labelEl}
+
+  function clampZoneLabel(label) {
+    return String(label == null ? "" : label).trim().slice(0, ZONE_LABEL_MAX_LEN) || "Zone";
+  }
+
+  // Resolves a field-linked zone's live field/option definitions, or null
+  // if the zone isn't field-linked (or the field/option it pointed to was
+  // since renamed away/deleted from Manage Fields).
+  function zoneFieldOption(zone) {
+    if (!zone.fieldId || !zone.optionId) return null;
+    const field = boardFields.find((f) => f.id === zone.fieldId);
+    if (!field) return null;
+    const option = findOptionDef(field, zone.optionId);
+    return option ? { field, option } : null;
+  }
+
+  // Tints a field-linked zone's header with its option's color, so it's
+  // visually obvious the column is wired to a field (vs. a plain column or
+  // a freehand region). Safe to call on any zone; no-ops otherwise.
+  function refreshZoneFieldTint(id) {
+    const zone = zones.get(id);
+    const refs = zoneEls.get(id);
+    if (!zone || !refs) return;
+    const match = zoneFieldOption(zone);
+    if (match) {
+      refs.header.style.background = match.option.color + "33";
+      refs.header.style.borderBottomColor = match.option.color;
+      refs.labelEl.title = `Tap to rename — linked to ${match.field.name}: ${match.option.label}`;
+    } else {
+      refs.header.style.background = "";
+      refs.header.style.borderBottomColor = "";
+      refs.labelEl.title = "Tap to rename";
+    }
+  }
+
+  function refreshAllZoneFieldTints() {
+    for (const id of zones.keys()) refreshZoneFieldTint(id);
+  }
+
+  function createZoneElement(zone) {
+    const el = document.createElement("div");
+    el.className = "zone";
+    el.dataset.id = zone.id;
+    el.style.width = zone.w + "px";
+    el.style.height = zone.h + "px";
+
+    const header = document.createElement("div");
+    header.className = "zone-header";
+
+    const labelEl = document.createElement("span");
+    labelEl.className = "zone-label";
+    labelEl.textContent = zone.label;
+    labelEl.title = "Tap to rename";
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "zone-del";
+    delBtn.textContent = "×";
+    delBtn.title = "Delete zone";
+
+    header.appendChild(labelEl);
+    header.appendChild(delBtn);
+
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "zone-resize";
+    resizeHandle.title = "Drag to resize";
+
+    el.appendChild(header);
+    el.appendChild(resizeHandle);
+    world.insertBefore(el, cursorsEl);
+
+    labelEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const next = prompt("Rename zone:", zone.label);
+      if (next === null) return;
+      setZoneLabel(zone.id, next);
+    });
+    delBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteZone(zone.id);
+      MP.sendZoneDelete(zone.id);
+    });
+
+    zoneEls.set(zone.id, { el, header, labelEl });
+    refreshZoneFieldTint(zone.id);
+    return el;
+  }
+
+  function positionZoneEl(id) {
+    const zone = zones.get(id);
+    const refs = zoneEls.get(id);
+    if (!zone || !refs) return;
+    refs.el.style.left = zone.x + "px";
+    refs.el.style.top = zone.y + "px";
+  }
+
+  function addZoneLocally(zone) {
+    zone.label = clampZoneLabel(zone.label);
+    zones.set(zone.id, zone);
+    createZoneElement(zone);
+    positionZoneEl(zone.id);
+  }
+
+  // `extra` carries optional {fieldId, optionId} to link this zone (a
+  // kanban-style column) to one option of a board select field.
+  function addZone(x, y, w, h, label, extra) {
+    const id = makeId();
+    const zone = { id, x, y, w, h, label: clampZoneLabel(label), ...(extra || {}) };
+    addZoneLocally(zone);
+    MP.sendZoneCreate(zone);
+    return id;
+  }
+
+  function deleteZone(id) {
+    zones.delete(id);
+    const refs = zoneEls.get(id);
+    if (refs) refs.el.remove();
+    zoneEls.delete(id);
+  }
+
+  function setZoneLabel(id, label) {
+    const zone = zones.get(id);
+    if (!zone) return;
+    zone.label = clampZoneLabel(label);
+    const refs = zoneEls.get(id);
+    if (refs) refs.labelEl.textContent = zone.label;
+    MP.sendZoneUpdate(id, { label: zone.label });
+  }
+
+  function applyRemoteZone(data) {
+    const zone = zones.get(data.id);
+    if (!zone) return;
+    Object.assign(zone, data);
+    delete zone.from;
+    delete zone.t;
+    delete zone.kind;
+    if (typeof data.label === "string") zone.label = clampZoneLabel(data.label);
+    const refs = zoneEls.get(data.id);
+    if (refs) {
+      refs.labelEl.textContent = zone.label;
+      if (typeof data.w === "number") refs.el.style.width = zone.w + "px";
+      if (typeof data.h === "number") refs.el.style.height = zone.h + "px";
+    }
+    positionZoneEl(data.id);
+    refreshZoneFieldTint(data.id);
+  }
+
+  // ---------- Zone <-> note geometry (stacking, membership, collisions) ----------
+  function zoneContentRect(zone) {
+    return { x: zone.x, y: zone.y + ZONE_HEADER_H, w: zone.w, h: Math.max(0, zone.h - ZONE_HEADER_H) };
+  }
+
+  function noteCenter(note) {
+    return { x: note.x + note.w / 2, y: note.y + note.h / 2 };
+  }
+
+  function pointInRect(p, r) {
+    return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+  }
+
+  // A note "belongs" to whichever zone its center point falls inside --
+  // the same rule used to decide field membership and stacking order. If
+  // zones overlap (rare -- freehand regions can be drawn on top of each
+  // other), the first one created wins, since Map iteration is insertion
+  // order.
+  function findContainingZone(point) {
+    for (const zone of zones.values()) {
+      if (pointInRect(point, zoneContentRect(zone))) return zone;
+    }
+    return null;
+  }
+
+  function notesInZone(zoneId, excludeNoteId) {
+    const zone = zones.get(zoneId);
+    if (!zone) return [];
+    const r = zoneContentRect(zone);
+    const result = [];
+    for (const note of notes.values()) {
+      if (note.id === excludeNoteId) continue;
+      if (pointInRect(noteCenter(note), r)) result.push(note);
+    }
+    return result;
+  }
+
+  // Auto-arranges `note` into zone's stack of notes, top to bottom, single
+  // column. Where it lands in the order depends on where its *dropped*
+  // center point falls relative to the other notes' current centers --
+  // above the first note's midpoint puts it first, below the last puts it
+  // last, and between two notes' midpoints inserts it between them. Every
+  // other note in the zone is repositioned to keep the stack gapless, and
+  // those repositions are broadcast; the caller is responsible for
+  // broadcasting `note`'s own final position.
+  function snapNoteIntoZoneStack(note, zone) {
+    const r = zoneContentRect(zone);
+    const others = notesInZone(zone.id, note.id).sort((a, b) => a.y - b.y);
+    const dropCenterY = note.y + note.h / 2;
+    let insertIndex = others.length;
+    for (let i = 0; i < others.length; i++) {
+      if (dropCenterY < others[i].y + others[i].h / 2) {
+        insertIndex = i;
+        break;
+      }
+    }
+    others.splice(insertIndex, 0, note);
+    let y = r.y + ZONE_STACK_MARGIN;
+    for (const n of others) {
+      n.x = zone.x + Math.max(0, (zone.w - n.w) / 2);
+      n.y = y;
+      y += n.h + ZONE_STACK_GAP;
+      positionNoteEl(n.id);
+      if (n.id !== note.id) MP.sendMove(n.id, n.x, n.y, n.z);
+    }
+  }
+
+  // The Option/Alt-held "manual placement" path: keeps wherever the user
+  // dropped the note, just nudged fully inside the zone so it doesn't end
+  // up straddling the zone's border.
+  function clampNoteFullyInsideZone(note, zone) {
+    const r = zoneContentRect(zone);
+    note.x = clamp(note.x, r.x, Math.max(r.x, r.x + r.w - note.w));
+    note.y = clamp(note.y, r.y, Math.max(r.y, r.y + r.h - note.h));
+  }
+
+  // A note that lands outside every zone (by the center-point rule) should
+  // still never end up straddling a zone's border -- so if it overlaps one
+  // without being "inside" it, push it out through whichever edge it's
+  // penetrating the least.
+  function pushNoteOutOfOverlappingZones(note) {
+    for (const zone of zones.values()) {
+      const r = zoneContentRect(zone);
+      const overlapsX = note.x < r.x + r.w && note.x + note.w > r.x;
+      const overlapsY = note.y < r.y + r.h && note.y + note.h > r.y;
+      if (!(overlapsX && overlapsY)) continue;
+      const penLeft = note.x + note.w - r.x;
+      const penRight = r.x + r.w - note.x;
+      const penTop = note.y + note.h - r.y;
+      const penBottom = r.y + r.h - note.y;
+      const minPen = Math.min(penLeft, penRight, penTop, penBottom);
+      if (minPen === penLeft) note.x = r.x - note.w;
+      else if (minPen === penRight) note.x = r.x + r.w;
+      else if (minPen === penTop) note.y = r.y - note.h;
+      else note.y = r.y + r.h;
+    }
+  }
+
+  // ---------- Field <-> zone bidirectional sync ----------
+  // Drop -> field: dropping a note into a field-linked zone sets that
+  // field's value on the note to the zone's option.
+  function syncNoteFieldToZone(note, zone) {
+    if (!zone.fieldId || !zone.optionId) return;
+    if (noteFieldValues(note)[zone.fieldId] === zone.optionId) return;
+    setNoteFieldValue(note.id, zone.fieldId, zone.optionId);
+  }
+
+  // Field -> drop: changing a select field's value (from the note's fields
+  // popover) moves the note into whichever zone is linked to that
+  // field/option, if any -- unless it's already there, which avoids
+  // undoing the drop-side sync above re-triggering a redundant relayout.
+  function syncZonePositionToField(note, fieldId, value) {
+    if (!value) return;
+    const field = boardFields.find((f) => f.id === fieldId);
+    if (!field || field.type !== "select") return;
+    const targetZone = [...zones.values()].find((z) => z.fieldId === fieldId && z.optionId === value);
+    if (!targetZone) return;
+    const current = findContainingZone(noteCenter(note));
+    if (current && current.id === targetZone.id) return;
+    snapNoteIntoZoneStack(note, targetZone);
+    positionNoteEl(note.id);
+    MP.sendMove(note.id, note.x, note.y, note.z);
+  }
+
+  // Resolves the destination of a note drag once the pointer is released:
+  // finds which zone (if any) the note's dropped center point landed in,
+  // arranges it there (auto-stacked, or just clamped-in-bounds if Option/
+  // Alt is held), keeps a field-linked zone's field in sync, and otherwise
+  // makes sure the note isn't left straddling some other zone's border.
+  function finalizeNoteDrop(id, altPlacement) {
+    const note = notes.get(id);
+    if (!note) return;
+    const zone = findContainingZone(noteCenter(note));
+    if (zone) {
+      if (altPlacement) clampNoteFullyInsideZone(note, zone);
+      else snapNoteIntoZoneStack(note, zone);
+      positionNoteEl(id);
+      MP.sendMove(id, note.x, note.y, note.z);
+      syncNoteFieldToZone(note, zone);
+    } else {
+      pushNoteOutOfOverlappingZones(note);
+      positionNoteEl(id);
+      MP.sendMove(id, note.x, note.y, note.z);
+    }
   }
 
   function selectNote(id) {
@@ -857,10 +1243,71 @@
     selectedId = id;
     bringToFront(id);
     if (noteEls.has(id)) noteEls.get(id).el.classList.add("selected");
-    // Selecting a note is how the format toolbar appears on touch, where
-    // there's no hover signal -- on desktop this just reinforces what
-    // hovering the note already showed (see pointerenter above).
+    // Moving selection to a different note (a click, a drag, a resize) means
+    // we're no longer editing whatever note was previously being edited.
+    if (editingNoteId && editingNoteId !== id) exitEditMode(editingNoteId);
+  }
+
+  // The note currently in "edit mode": contentEditable, I-beam cursor,
+  // header (Color/Fields/Delete) visible -- see enterEditMode/exitEditMode.
+  // Kept separate from formatTargetId/the toolbar's own visibility, because
+  // opening the Color or Fields popover also hides the toolbar (to avoid
+  // overlapping it) without leaving edit mode itself -- the header those
+  // buttons live in needs to stay up while their popover is open.
+  let editingNoteId = null;
+
+  // The only way into "edit mode": clicking a note that's already selected,
+  // without dragging it (see the boardWrap pointerdown/pointerup handlers
+  // below). This is deliberately separate from selectNote, which also
+  // happens on the *first* click (for dragging, resizing) -- edit mode is
+  // reserved for when the user actually wants to type or see the format
+  // toolbar. clientX/clientY, when given, are used to land the caret under
+  // the click that triggered edit mode rather than always at the start of
+  // the text.
+  function enterEditMode(id, clientX, clientY) {
+    selectNote(id);
+    const refs = noteEls.get(id);
+    if (!refs) return;
+    editingNoteId = id;
+    refs.el.classList.add("editing");
+    // An image note has no text to edit -- "edit mode" for it just means
+    // revealing its header (color/replace-image/fields/delete), the same
+    // class toggle a text note uses, minus everything text-specific below.
+    if (!refs.editor) return;
+    refs.editor.contentEditable = "true";
+    scheduleAutofit(id);
     showFormatToolbarFor(id);
+    refs.editor.focus();
+    if (typeof clientX !== "number") return;
+    const range =
+      document.caretRangeFromPoint
+        ? document.caretRangeFromPoint(clientX, clientY)
+        : document.caretPositionFromPoint
+        ? (() => {
+            const pos = document.caretPositionFromPoint(clientX, clientY);
+            if (!pos) return null;
+            const r = document.createRange();
+            r.setStart(pos.offsetNode, pos.offset);
+            r.collapse(true);
+            return r;
+          })()
+        : null;
+    if (range && refs.editor.contains(range.startContainer)) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
+  function exitEditMode(id) {
+    if (editingNoteId === id) editingNoteId = null;
+    if (formatTargetId === id) closeFormatToolbar();
+    const refs = noteEls.get(id);
+    if (!refs) return;
+    refs.el.classList.remove("editing");
+    if (!refs.editor) return;
+    refs.editor.contentEditable = "false";
+    scheduleAutofit(id);
   }
 
   function deselectNote() {
@@ -869,7 +1316,7 @@
     }
     selectedId = null;
     closeColorPopover();
-    closeFormatToolbar();
+    if (editingNoteId) exitEditMode(editingNoteId);
     closeNoteFieldsPopover();
   }
 
@@ -968,9 +1415,9 @@
   // Same idea, but covering the note's whole body rather than just its
   // 20px header strip -- used to anchor the format toolbar, which (unlike
   // the color/fields popovers, still opened by clicking a small header
-  // button) shows on hover alone and is itself often taller/wider than a
-  // small note, so anchoring it to only the header would routinely leave it
-  // overlapping the note's own text underneath.
+  // button) is itself often taller/wider than a small note, so anchoring it
+  // to only the header would routinely leave it overlapping the note's own
+  // text underneath.
   function noteFullScreenRect(id) {
     const note = notes.get(id);
     const wrapRect = boardWrap.getBoundingClientRect();
@@ -1352,15 +1799,14 @@
     }
   });
 
-  // Hovering a note (desktop; see the pointerenter/pointerleave listeners in
-  // createNoteElement) or selecting one (touch tap, or a desktop click --
-  // see selectNote) shows its format toolbar; deliberately never focuses or
-  // touches the editor's own selection itself, since merely moving the
-  // mouse over a note must not yank the caret away from wherever the user
-  // is actually typing.
-  let hoverNoteId = null;
-  let hoverHideTimer = null;
-
+  // Shows the format toolbar for a note -- only ever called by enterEditMode
+  // (clicking an already-selected note), never by hover or plain selection,
+  // so it doesn't pop up while the user is just dragging a note around.
+  // Only ever shown for the note currently being edited (editingNoteId), but
+  // gets hidden independently of edit mode itself -- e.g. while the Color or
+  // Fields popover is open, to avoid overlapping it (see openColorPopover/
+  // openNoteFieldsPopover) -- so it doesn't touch the `editing` class or
+  // contentEditable; that's enterEditMode/exitEditMode's job.
   function showFormatToolbarFor(id) {
     if (!noteEls.has(id)) return;
     // Image notes have no rich-text editor for this toolbar to act on.
@@ -1377,25 +1823,6 @@
     positionPopoverNear(formatToolbar, noteFullScreenRect(id));
     refreshToolbarState();
   }
-
-  // The toolbar sits visually next to (not inside) the note, so moving the
-  // mouse from one to the other briefly leaves both -- a short grace period,
-  // cancelled by re-entering either, keeps that hop from closing it.
-  function scheduleFormatToolbarHideCheck() {
-    clearTimeout(hoverHideTimer);
-    hoverHideTimer = setTimeout(() => {
-      if (formatTargetId && formatTargetId !== selectedId && formatTargetId !== hoverNoteId) {
-        closeFormatToolbar();
-      }
-    }, 300);
-  }
-
-  formatToolbar.addEventListener("pointerenter", (e) => {
-    if (e.pointerType === "mouse") clearTimeout(hoverHideTimer);
-  });
-  formatToolbar.addEventListener("pointerleave", (e) => {
-    if (e.pointerType === "mouse") scheduleFormatToolbarHideCheck();
-  });
 
   function closeFormatToolbar() {
     formatToolbar.hidden = true;
@@ -1493,6 +1920,11 @@
         name: f && typeof f.name === "string" && f.name.trim() ? f.name.slice(0, 60) : "Field",
         type,
         options: [],
+        // Whether this field's value shows as a chip on the note card itself
+        // (see renderNoteFieldRow), as opposed to only in the note's Fields
+        // popover -- off by default so a board with many fields doesn't
+        // clutter every card automatically.
+        showOnCard: !!(f && f.showOnCard),
       };
       if (FIELD_TYPES_WITH_OPTIONS.has(type) && f && Array.isArray(f.options)) {
         def.options = f.options.slice(0, 40).map((o) => ({
@@ -1547,6 +1979,7 @@
     renderFieldsManager();
     renderAllNoteFieldRows();
     if (fieldsPopoverNoteId) renderNoteFieldsPopoverContent(fieldsPopoverNoteId);
+    refreshAllZoneFieldTints();
   }
 
   function applyRemoteFieldDefs(fields) {
@@ -1554,6 +1987,7 @@
     renderFieldsManager();
     renderAllNoteFieldRows();
     if (fieldsPopoverNoteId) renderNoteFieldsPopoverContent(fieldsPopoverNoteId);
+    refreshAllZoneFieldTints();
   }
 
   // ---------- Per-note field chips ----------
@@ -1593,6 +2027,7 @@
     const values = noteFieldValues(note);
     let any = false;
     for (const field of boardFields) {
+      if (!field.showOnCard) continue;
       const value = values[field.id];
       if (field.type === "checkbox") {
         if (!value) continue;
@@ -1662,6 +2097,7 @@
     else note.fields[fieldId] = value;
     renderNoteFieldRow(id);
     MP.sendUpdate(id, { fields: note.fields });
+    if (!isEmpty) syncZonePositionToField(note, fieldId, value);
   }
 
   // A small text input + "Add" button for typing a free-form name into a
@@ -1953,6 +2389,19 @@
     top.appendChild(delBtn);
     row.appendChild(top);
 
+    const showOnCardRow = document.createElement("label");
+    showOnCardRow.className = "field-checkbox-row";
+    const showOnCardCb = document.createElement("input");
+    showOnCardCb.type = "checkbox";
+    showOnCardCb.checked = !!field.showOnCard;
+    showOnCardCb.addEventListener("change", () => {
+      field.showOnCard = showOnCardCb.checked;
+      commitFieldDefs();
+    });
+    showOnCardRow.appendChild(showOnCardCb);
+    showOnCardRow.appendChild(document.createTextNode(" Show on card"));
+    row.appendChild(showOnCardRow);
+
     if (FIELD_TYPES_WITH_OPTIONS.has(field.type)) row.appendChild(renderFieldOptionsEditor(field));
     if (field.type === "user") row.appendChild(renderUserFieldSettings(field));
 
@@ -2148,10 +2597,10 @@
     };
     addNoteLocally(note);
     MP.sendCreate(note);
-    // A blank note is created for immediate typing, so it should grab focus;
-    // a batch of notes from a photo scan shouldn't steal focus from any of them.
-    const refs = noteEls.get(id);
-    if (refs && !text) refs.editor.focus();
+    // A blank note is created for immediate typing, so it should go straight
+    // into edit mode; a batch of notes from a photo scan shouldn't steal
+    // focus/edit mode from any of them.
+    if (!text) enterEditMode(id);
     return id;
   }
 
@@ -2340,7 +2789,7 @@
   });
 
   boardWrap.addEventListener("dblclick", (e) => {
-    if (isUiChrome(e.target) || e.target.closest(".note")) return;
+    if (isUiChrome(e.target) || e.target.closest(".note") || e.target.closest(".zone-header") || e.target.closest(".zone-resize")) return;
     const p = screenToWorld(e.clientX, e.clientY);
     addNote(p.x, p.y);
   });
@@ -2358,10 +2807,23 @@
   let dragPointerId = null;
   let dragNoteId = null;
   let dragOffset = null;
+  let dragMoved = false; // whether a note drag actually relocated it -- a plain click shouldn't trigger zone snapping
+  let dragStartScreen = null; // screen coords at pointerdown, for the click-vs-drag threshold
+  let dragEnterEditOnClick = false; // pointerdown landed on an already-selected, not-yet-editing note -- a plain click (no drag) enters edit mode
   let lastMoveSent = 0;
   let resizePointerId = null;
   let resizeNoteId = null;
   let resizeStart = null;
+  let zoneDragPointerId = null;
+  let zoneDragId = null;
+  let zoneDragOffset = null;
+  let zoneResizePointerId = null;
+  let zoneResizeId = null;
+  let zoneResizeStart = null;
+  let drawZoneMode = false;
+  let zoneDrawPointerId = null;
+  let zoneDrawStart = null;
+  let zoneDrawPreviewEl = null;
 
   function pointDist(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);
@@ -2392,11 +2854,28 @@
     dragNoteId = null;
     dragPointerId = null;
     dragOffset = null;
+    dragMoved = false;
+    dragStartScreen = null;
+    dragEnterEditOnClick = false;
     panPointerId = null;
     panAnchorWorld = null;
     resizeNoteId = null;
     resizePointerId = null;
     resizeStart = null;
+    zoneDragId = null;
+    zoneDragPointerId = null;
+    zoneDragOffset = null;
+    zoneResizeId = null;
+    zoneResizePointerId = null;
+    zoneResizeStart = null;
+    cancelZoneDraw();
+  }
+
+  function cancelZoneDraw() {
+    if (zoneDrawPreviewEl) zoneDrawPreviewEl.remove();
+    zoneDrawPreviewEl = null;
+    zoneDrawPointerId = null;
+    zoneDrawStart = null;
   }
 
   boardWrap.addEventListener("pointerdown", (e) => {
@@ -2409,21 +2888,6 @@
       return;
     }
     if (activePointers.size > 2) return;
-
-    const headerEl = e.target.closest(".note-header");
-    if (headerEl && !e.target.closest("button")) {
-      const noteEl = headerEl.closest(".note");
-      const id = noteEl.dataset.id;
-      const note = notes.get(id);
-      if (!note) return;
-      selectNote(id);
-      const world = screenToWorld(e.clientX, e.clientY);
-      dragOffset = { x: world.x - note.x, y: world.y - note.y };
-      dragNoteId = id;
-      dragPointerId = e.pointerId;
-      e.preventDefault();
-      return;
-    }
 
     const resizeEl = e.target.closest(".note-resize");
     if (resizeEl) {
@@ -2440,7 +2904,84 @@
       return;
     }
 
-    if (e.target.closest(".note")) return; // let the editor/buttons handle it natively
+    // A note in edit mode only drags from its header (visible while editing
+    // -- see the .editing CSS); everywhere else in it is native
+    // contentEditable territory, left to the editor itself. A note that
+    // isn't being edited has no header to grab, so the whole note is the
+    // drag target instead -- except a checklist checkbox hit, which the
+    // editor's own mousedown listener needs to toggle instead of the note
+    // starting a drag. Either way this only *arms* a drag; the
+    // pointermove/pointerup handlers below decide whether the pointer
+    // actually moved enough to count as one, or whether it was a plain
+    // click (which selects the note, and enters edit mode if it was
+    // already selected -- see dragEnterEditOnClick).
+    const noteHit = e.target.closest(".note");
+    if (noteHit) {
+      const id = noteHit.dataset.id;
+      const note = notes.get(id);
+      if (!note) return;
+      const editing = editingNoteId === id;
+      if (editing) {
+        const headerEl = e.target.closest(".note-header");
+        if (!headerEl || e.target.closest("button")) return;
+      } else if (checklistCheckboxHit(e)) {
+        return;
+      }
+      const wasAlreadySelected = selectedId === id;
+      selectNote(id);
+      const world = screenToWorld(e.clientX, e.clientY);
+      dragOffset = { x: world.x - note.x, y: world.y - note.y };
+      dragNoteId = id;
+      dragPointerId = e.pointerId;
+      dragMoved = false;
+      dragStartScreen = { x: e.clientX, y: e.clientY };
+      dragEnterEditOnClick = !editing && wasAlreadySelected;
+      e.preventDefault();
+      return;
+    }
+
+    const zoneHeaderEl = e.target.closest(".zone-header");
+    if (zoneHeaderEl && !e.target.closest("button") && !e.target.closest(".zone-label")) {
+      const zoneEl = zoneHeaderEl.closest(".zone");
+      const id = zoneEl.dataset.id;
+      const zone = zones.get(id);
+      if (!zone) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      zoneDragOffset = { x: world.x - zone.x, y: world.y - zone.y };
+      zoneDragId = id;
+      zoneDragPointerId = e.pointerId;
+      e.preventDefault();
+      return;
+    }
+
+    const zoneResizeEl = e.target.closest(".zone-resize");
+    if (zoneResizeEl) {
+      const zoneEl = zoneResizeEl.closest(".zone");
+      const id = zoneEl.dataset.id;
+      const zone = zones.get(id);
+      if (!zone) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      zoneResizeStart = { worldX: world.x, worldY: world.y, w: zone.w, h: zone.h };
+      zoneResizeId = id;
+      zoneResizePointerId = e.pointerId;
+      e.preventDefault();
+      return;
+    }
+
+    if (drawZoneMode) {
+      const p = screenToWorld(e.clientX, e.clientY);
+      zoneDrawStart = p;
+      zoneDrawPointerId = e.pointerId;
+      zoneDrawPreviewEl = document.createElement("div");
+      zoneDrawPreviewEl.className = "zone-draw-preview";
+      zoneDrawPreviewEl.style.left = p.x + "px";
+      zoneDrawPreviewEl.style.top = p.y + "px";
+      zoneDrawPreviewEl.style.width = "0px";
+      zoneDrawPreviewEl.style.height = "0px";
+      world.insertBefore(zoneDrawPreviewEl, cursorsEl);
+      e.preventDefault();
+      return;
+    }
 
     panPointerId = e.pointerId;
     panAnchorWorld = screenToWorld(e.clientX, e.clientY);
@@ -2459,6 +3000,12 @@
     if (dragNoteId && e.pointerId === dragPointerId) {
       const note = notes.get(dragNoteId);
       if (!note) return;
+      if (!dragMoved) {
+        if (pointDist({ x: e.clientX, y: e.clientY }, dragStartScreen) < CLICK_DRAG_THRESHOLD_PX) return;
+        dragMoved = true;
+        const refs = noteEls.get(dragNoteId);
+        if (refs) refs.el.classList.add("dragging");
+      }
       const world = screenToWorld(e.clientX, e.clientY);
       note.x = world.x - dragOffset.x;
       note.y = world.y - dragOffset.y;
@@ -2491,6 +3038,53 @@
       return;
     }
 
+    if (zoneDragId && e.pointerId === zoneDragPointerId) {
+      const zone = zones.get(zoneDragId);
+      if (!zone) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      zone.x = world.x - zoneDragOffset.x;
+      zone.y = world.y - zoneDragOffset.y;
+      positionZoneEl(zoneDragId);
+      const now = performance.now();
+      if (now - lastMoveSent > 60) {
+        MP.sendZoneMove(zoneDragId, zone.x, zone.y);
+        lastMoveSent = now;
+      }
+      return;
+    }
+
+    if (zoneResizeId && e.pointerId === zoneResizePointerId) {
+      const zone = zones.get(zoneResizeId);
+      if (!zone) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      zone.w = Math.max(MIN_ZONE_W, zoneResizeStart.w + (world.x - zoneResizeStart.worldX));
+      zone.h = Math.max(MIN_ZONE_H, zoneResizeStart.h + (world.y - zoneResizeStart.worldY));
+      const refs = zoneEls.get(zoneResizeId);
+      if (refs) {
+        refs.el.style.width = zone.w + "px";
+        refs.el.style.height = zone.h + "px";
+      }
+      const now = performance.now();
+      if (now - lastMoveSent > 60) {
+        MP.sendZoneUpdate(zoneResizeId, { w: Math.round(zone.w), h: Math.round(zone.h) });
+        lastMoveSent = now;
+      }
+      return;
+    }
+
+    if (zoneDrawPointerId === e.pointerId && zoneDrawStart && zoneDrawPreviewEl) {
+      const world = screenToWorld(e.clientX, e.clientY);
+      const x = Math.min(zoneDrawStart.x, world.x);
+      const y = Math.min(zoneDrawStart.y, world.y);
+      const w = Math.abs(world.x - zoneDrawStart.x);
+      const h = Math.abs(world.y - zoneDrawStart.y);
+      zoneDrawPreviewEl.style.left = x + "px";
+      zoneDrawPreviewEl.style.top = y + "px";
+      zoneDrawPreviewEl.style.width = w + "px";
+      zoneDrawPreviewEl.style.height = h + "px";
+      return;
+    }
+
     if (panPointerId === e.pointerId && panAnchorWorld) {
       const rect = boardWrap.getBoundingClientRect();
       camera.x = panAnchorWorld.x - (e.clientX - rect.left) / camera.scale;
@@ -2511,10 +3105,22 @@
 
     if (dragNoteId && e.pointerId === dragPointerId) {
       const note = notes.get(dragNoteId);
-      if (note) MP.sendMove(dragNoteId, note.x, note.y, note.z);
+      if (note) {
+        if (dragMoved) {
+          finalizeNoteDrop(dragNoteId, e.altKey);
+        } else {
+          MP.sendMove(dragNoteId, note.x, note.y, note.z);
+          if (dragEnterEditOnClick) enterEditMode(dragNoteId, e.clientX, e.clientY);
+        }
+      }
+      const refs = noteEls.get(dragNoteId);
+      if (refs) refs.el.classList.remove("dragging");
       dragNoteId = null;
       dragPointerId = null;
       dragOffset = null;
+      dragMoved = false;
+      dragStartScreen = null;
+      dragEnterEditOnClick = false;
     }
     if (resizeNoteId && e.pointerId === resizePointerId) {
       const note = notes.get(resizeNoteId);
@@ -2527,6 +3133,36 @@
       panPointerId = null;
       panAnchorWorld = null;
     }
+    if (zoneDragId && e.pointerId === zoneDragPointerId) {
+      const zone = zones.get(zoneDragId);
+      if (zone) MP.sendZoneMove(zoneDragId, zone.x, zone.y);
+      zoneDragId = null;
+      zoneDragPointerId = null;
+      zoneDragOffset = null;
+    }
+    if (zoneResizeId && e.pointerId === zoneResizePointerId) {
+      const zone = zones.get(zoneResizeId);
+      if (zone) MP.sendZoneUpdate(zoneResizeId, { w: Math.round(zone.w), h: Math.round(zone.h) });
+      zoneResizeId = null;
+      zoneResizePointerId = null;
+      zoneResizeStart = null;
+    }
+    if (zoneDrawPointerId === e.pointerId && zoneDrawStart) {
+      const world = screenToWorld(e.clientX, e.clientY);
+      const x = Math.min(zoneDrawStart.x, world.x);
+      const y = Math.min(zoneDrawStart.y, world.y);
+      const w = Math.abs(world.x - zoneDrawStart.x);
+      const h = Math.abs(world.y - zoneDrawStart.y);
+      cancelZoneDraw();
+      drawZoneMode = false;
+      boardWrap.classList.remove("drawing-zone");
+      if (w >= 20 && h >= 20) {
+        const label = prompt("Name this zone:", "Zone");
+        if (label !== null) {
+          addZone(x, y, Math.max(MIN_ZONE_W, w), Math.max(MIN_ZONE_H, h), label);
+        }
+      }
+    }
   });
 
   // ---------- Multiplayer (Cloudflare Worker + Durable Objects) ----------
@@ -2536,6 +3172,7 @@
     let ws = null;
     let boardId = "";
     let reconnectDelay = 1000;
+    let reconnectTimer = null;
     const remoteCursorEls = new Map(); // fromId -> element
     const remoteLastSeen = new Map();
     let lastCursorSent = 0;
@@ -2597,6 +3234,10 @@
     }
 
     function connect() {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       const host = workerHost();
       if (!host || host.includes("YOUR-")) {
         setConnDot("disconnected", "Multiplayer isn't configured yet — see README.md. Notes still work locally.");
@@ -2612,10 +3253,9 @@
       };
       ws.onclose = () => {
         setConnDot("disconnected");
-        setTimeout(connect, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 1.6, 15000);
         onlineConnToUser.clear();
         renderPresenceRow();
+        scheduleReconnect();
       };
       ws.onerror = () => {
         try { ws.close(); } catch (err) { /* already closing */ }
@@ -2626,6 +3266,33 @@
         handleMessage(msg);
       };
     }
+
+    // Skip reconnecting while the tab is hidden: nobody's watching this
+    // board, so there's nothing to sync live, and a background tab still
+    // retrying every few seconds is exactly the traffic pattern that trips
+    // Cloudflare's workers.dev rate limiting when many tabs do it at once.
+    // The visibilitychange listener below reconnects right away once the
+    // tab is looked at again.
+    function scheduleReconnect() {
+      if (document.hidden) return;
+      reconnectTimer = setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 1.6, 15000);
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          ws.close();
+        }
+      } else if (!ws || ws.readyState === WebSocket.CLOSED) {
+        reconnectDelay = 1000;
+        connect();
+      }
+    });
 
     function handleMessage(msg) {
       switch (msg.t) {
@@ -2656,16 +3323,29 @@
               if (!seenIds.has(id)) deleteNote(id);
             }
           }
+          for (const zone of msg.zones || []) {
+            try {
+              addZoneLocally(zone);
+            } catch (err) {
+              console.error("Failed to add zone from history", zone, err);
+            }
+          }
           break;
         case "create":
-          if (!notes.has(msg.id)) addNoteLocally(msg);
+          if (msg.kind === "zone") {
+            if (!zones.has(msg.id)) addZoneLocally(msg);
+          } else if (!notes.has(msg.id)) {
+            addNoteLocally(msg);
+          }
           break;
         case "move":
         case "update":
-          applyRemoteNote(msg);
+          if (msg.kind === "zone") applyRemoteZone(msg);
+          else applyRemoteNote(msg);
           break;
         case "delete":
-          deleteNote(msg.id);
+          if (msg.kind === "zone") deleteZone(msg.id);
+          else deleteNote(msg.id);
           break;
         case "clear":
           clearAllNotes();
@@ -2773,6 +3453,10 @@
       sendUpdate: (id, fields) => send({ t: "update", id, ...fields }),
       sendDelete: (id) => send({ t: "delete", id }),
       sendClear: () => send({ t: "clear" }),
+      sendZoneCreate: (zone) => send({ t: "create", kind: "zone", ...zone }),
+      sendZoneMove: (id, x, y) => send({ t: "move", kind: "zone", id, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 }),
+      sendZoneUpdate: (id, fields) => send({ t: "update", kind: "zone", id, ...fields }),
+      sendZoneDelete: (id) => send({ t: "delete", kind: "zone", id }),
       sendFields: (fields) => send({ t: "fields", fields }),
       sendIdentity,
       sendBackground: (background) => send({ t: "background", background }),

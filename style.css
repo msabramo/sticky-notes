@@ -228,6 +228,42 @@ body {
   background-size: 40px 40px;
 }
 
+.board-wrap.bg-snow {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.board-wrap.bg-linen {
+  background-color: #f2e2c4;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.board-wrap.bg-blush {
+  background-color: #fbe0e6;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.board-wrap.bg-plain-white {
+  background-color: #ffffff;
+}
+
+.board-wrap.bg-plain-tan {
+  background-color: #f2e2c4;
+}
+
+.board-wrap.bg-plain-pink {
+  background-color: #fbe0e6;
+}
+
 .board-wrap.bg-chalkboard {
   background-color: #22392b;
   background-image:
@@ -290,7 +326,93 @@ body {
 }
 .remote-cursor-label:empty { display: none; }
 
+/* ---------- Zones (columns / custom regions) ---------- */
+.zone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0; /* always behind notes, whose z-index comes from a huge z counter */
+  border: 2px dashed rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  pointer-events: none; /* lets clicks/drags pass through to the board or notes beneath */
+}
+
+.zone-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 4px 0 10px;
+  cursor: grab;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 8px 8px 0 0;
+}
+.zone-header:active { cursor: grabbing; }
+
+.zone-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+.zone-label:hover { color: var(--text); }
+
+.zone-del {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.zone-del:hover { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+
+.zone-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  pointer-events: auto;
+  cursor: nwse-resize;
+  touch-action: none;
+  background:
+    linear-gradient(135deg, transparent 0 45%, rgba(255, 255, 255, 0.3) 45% 55%, transparent 55% 100%),
+    linear-gradient(135deg, transparent 0 65%, rgba(255, 255, 255, 0.3) 65% 75%, transparent 75% 100%);
+}
+
+.zone-draw-preview {
+  position: absolute;
+  z-index: 0;
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  background: rgba(255, 107, 61, 0.12);
+  pointer-events: none;
+}
+
+.board-wrap.drawing-zone { cursor: crosshair; }
+
 /* ---------- Sticky note ---------- */
+/* A note not being edited is a drag target everywhere on it (see the
+   boardWrap pointerdown handler in script.js) -- grab/grabbing communicates
+   that. Edit mode (the .editing class, toggled alongside contentEditable by
+   enterEditMode/exitEditMode in script.js) flips the text to an I-beam and
+   reveals the header, the only drag handle left once typing is possible. */
 .note {
   position: absolute;
   top: 0;
@@ -302,19 +424,22 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  cursor: grab;
 }
+.note.dragging { cursor: grabbing; }
 
 .note-header {
+  display: none;
   height: 20px;
   flex-shrink: 0;
   cursor: grab;
-  display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
   padding: 0 2px;
   background: rgba(0, 0, 0, 0.08);
 }
+.note.editing .note-header { display: flex; }
 .note-header:active { cursor: grabbing; }
 
 .note-header button {
@@ -341,7 +466,11 @@ body {
   line-height: 1.25;
   color: rgba(0, 0, 0, 0.82);
   padding: 4px 10px 10px;
+  user-select: none;
+}
+.note.editing .note-text {
   cursor: text;
+  user-select: text;
 }
 /* JS binary-searches the biggest font-size (set inline) that still fits the
    note's box, so text scales up to fill small notes and shrinks to fit big
@@ -433,44 +562,17 @@ body {
   height: 100%;
   object-fit: cover;
   display: block;
-  cursor: pointer;
   -webkit-user-drag: none;
   user-select: none;
 }
 
 /* A "bare" note -- transparent-color text, or any image note -- is meant to
    read as text/a photo sitting directly on the board rather than a pinned
-   sticky note: no paper shadow, and its header/resize handle (still needed
-   to drag/delete/resize/replace it) only appear on hover or while selected,
-   floated over the content instead of reserving their own row, so an image
-   note's photo can fill the whole box edge to edge. */
+   sticky note: just no paper shadow. Its header already only shows in edit
+   mode (.note.editing .note-header above) like any other note, so there's
+   nothing extra to do there for the "sits flush on the board" look. */
 .note.note-bare {
   box-shadow: none;
-}
-.note.note-bare .note-header {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-.note.note-bare:hover .note-header,
-.note.note-bare.selected .note-header,
-.note.note-bare .note-header:focus-within {
-  opacity: 1;
-}
-.note.note-bare .note-text {
-  padding-top: 10px;
-}
-.note.note-bare .note-resize {
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-.note.note-bare:hover .note-resize,
-.note.note-bare.selected .note-resize {
-  opacity: 1;
 }
 
 .note.selected {
@@ -531,8 +633,10 @@ body {
   position: absolute;
   z-index: 5;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 8px;
+  width: 122px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1125,6 +1229,42 @@ body {
     linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
   background-size: 10px 10px;
+}
+
+.bg-preview-snow {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.bg-preview-linen {
+  background-color: #f2e2c4;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.bg-preview-blush {
+  background-color: #fbe0e6;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.bg-preview-plain-white {
+  background-color: #ffffff;
+}
+
+.bg-preview-plain-tan {
+  background-color: #f2e2c4;
+}
+
+.bg-preview-plain-pink {
+  background-color: #fbe0e6;
 }
 
 .bg-preview-chalkboard {

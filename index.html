@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap" />
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=11" />
 </head>
 <body>
   <div class="app">
@@ -51,6 +51,12 @@
         <button class="color-opt" data-color="#a5d6a7" style="background:#a5d6a7"></button>
         <button class="color-opt" data-color="#90caf9" style="background:#90caf9"></button>
         <button class="color-opt" data-color="#ce93d8" style="background:#ce93d8"></button>
+        <button class="color-opt" data-color="#ffffff" style="background:#ffffff"></button>
+        <button class="color-opt" data-color="#f7f5f0" style="background:#f7f5f0"></button>
+        <button class="color-opt" data-color="#f2e2c4" style="background:#f2e2c4"></button>
+        <button class="color-opt" data-color="#e8d0a0" style="background:#e8d0a0"></button>
+        <button class="color-opt" data-color="#fbe0e6" style="background:#fbe0e6"></button>
+        <button class="color-opt" data-color="#f5c6d3" style="background:#f5c6d3"></button>
         <button class="color-opt color-opt-transparent" data-color="transparent" title="Transparent"></button>
       </div>
 
@@ -121,6 +127,24 @@
         <button type="button" class="bg-swatch" data-bg="whiteboard" title="Whiteboard">
           <span class="bg-swatch-preview bg-preview-whiteboard"></span>Whiteboard
         </button>
+        <button type="button" class="bg-swatch" data-bg="snow" title="Snow">
+          <span class="bg-swatch-preview bg-preview-snow"></span>Snow
+        </button>
+        <button type="button" class="bg-swatch" data-bg="linen" title="Linen">
+          <span class="bg-swatch-preview bg-preview-linen"></span>Linen
+        </button>
+        <button type="button" class="bg-swatch" data-bg="blush" title="Blush">
+          <span class="bg-swatch-preview bg-preview-blush"></span>Blush
+        </button>
+        <button type="button" class="bg-swatch" data-bg="plain-white" title="Plain White">
+          <span class="bg-swatch-preview bg-preview-plain-white"></span>Plain White
+        </button>
+        <button type="button" class="bg-swatch" data-bg="plain-tan" title="Plain Tan">
+          <span class="bg-swatch-preview bg-preview-plain-tan"></span>Plain Tan
+        </button>
+        <button type="button" class="bg-swatch" data-bg="plain-pink" title="Plain Pink">
+          <span class="bg-swatch-preview bg-preview-plain-pink"></span>Plain Pink
+        </button>
         <button type="button" class="bg-swatch" data-bg="chalkboard" title="Chalkboard">
           <span class="bg-swatch-preview bg-preview-chalkboard"></span>Chalkboard
         </button>
@@ -130,13 +154,20 @@
       </div>
     </div>
     <div class="menu-divider"></div>
+    <div class="menu-section">
+      <span class="menu-section-label">Zones</span>
+      <button id="createColumnsBtn" class="btn">▥ Create Columns…</button>
+      <button id="createColumnsFromFieldBtn" class="btn">🏷▥ Create Columns from Field…</button>
+      <button id="drawZoneBtn" class="btn">▭ Draw a Zone</button>
+    </div>
+    <div class="menu-divider"></div>
     <div class="menu-section actions">
       <button id="manageFieldsBtn" class="btn">🏷 Manage Fields</button>
       <button id="clearBtn" class="btn danger">🗑 Clear Board</button>
       <a href="?" id="newBoardLink" class="btn">✨ Start a New Board</a>
     </div>
     <div class="menu-divider"></div>
-    <p class="menu-hint">Tap + to add a note. Drag a note's colored header to move it, tap its body to type, and drag its bottom-right corner to resize it. Use the ● button to change its color. Hover over a note (or tap/select it on a touch device) to reveal its formatting toolbar: font, size, text color, bold/italic/underline/strikethrough, headings, bullet/numbered/checklist lists, links, alignment, indent, and images — select some text first to format just that part or to turn it into a link; with nothing selected, an inserted image drops in at your cursor. Tap a checklist item's checkbox to check it off. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields — including a Person(s) field that auto-fills from everyone who's used this board, optionally allowing more than one person and/or a freely-typed name for someone not on the board). Tap the circle next to ☰ to set your name, initials, and color so others can tell who's who. Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Tap 🖼️ to drop a photo straight onto the board as its own resizable, rotatable tile (handy for vision boards or mood boards) -- hover it and tap the 🖼 button in its (normally hidden) header to swap the photo. Pick the checkered swatch in a note's color picker to make its background transparent, so it reads as text or an image sitting right on the board instead of a sticky note -- its header and resize handle then only appear on hover, and its text can still use the alignment and font-color options in the formatting toolbar (e.g. for centered titles). Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
+    <p class="menu-hint">Tap + to add a note. A note drags from anywhere on it; tap an already-selected note to start typing, and drag its bottom-right corner to resize it. Use the ● button (visible while typing) to change its color, including a checkered "transparent" swatch that makes a note read as text or an image sitting right on the board instead of a sticky note. While typing, use the formatting toolbar: font, size, text color, bold/italic/underline/strikethrough, headings, bullet/numbered/checklist lists, links, alignment, indent, and images — select some text first to format just that part or to turn it into a link; with nothing selected, an inserted image drops in at your cursor. Tap a checklist item's checkbox to check it off. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields — including a Person(s) field that auto-fills from everyone who's used this board, optionally allowing more than one person and/or a freely-typed name for someone not on the board). Tap the circle next to ☰ to set your name, initials, and color so others can tell who's who. Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Tap 🖼️ to drop a photo straight onto the board as its own resizable, rotatable tile (handy for vision boards or mood boards) -- tap it and tap the 🖼 button in its header to swap the photo. Use "Create Columns…" to lay out a kanban-style board (e.g. To do, In progress, Done), or "Draw a Zone" to drag out your own labeled region — tap a zone's label to rename it or its × to remove it, and drag its bottom-right corner to resize it. "Create Columns from Field…" makes one column per option of a select field (e.g. Assignee) and keeps them in sync both ways: drop a note in a column and its field updates to match, or change the field on a note and it hops to that column. Dropped notes auto-stack into an open spot in whichever column or zone they land in — drop near the top, bottom, or between two notes to choose where; hold Option (Alt) while dropping to place a note freely instead. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
   </aside>
 
   <div class="fields-modal-backdrop no-print" id="fieldsModalBackdrop"></div>
@@ -152,6 +183,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=9"></script>
+  <script src="script.js?v=11"></script>
 </body>
 </html>
