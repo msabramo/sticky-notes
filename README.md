@@ -58,6 +58,12 @@ same coordinate space, so notes always line up between devices.
 - **Move a note** — drag its colored header strip. (The body is for
   typing; only the header initiates a drag, so starting to type never
   fights with starting to drag.)
+- **Select multiple notes** — Ctrl/Cmd-click each note to add or remove it
+  from the selection, or drag across empty board space to draw a lasso
+  around a group. Drag any note in the selection to move them all together,
+  each still snapping into its own zone independently on drop. Press
+  **Delete**/**Backspace** to remove every selected note at once (only
+  while you're not actively typing in one).
 - **Edit text** — tap/click the note's body.
 - **Resize a note** — drag the small grip in its bottom-right corner.
 - **Recolor** — tap the ● button in a note's header for a small palette.
@@ -118,17 +124,20 @@ same coordinate space, so notes always line up between devices.
   Grid (the default dotted-grid look), Whiteboard, Chalkboard, or Pinboard
   (a linen/cork texture). It's shared board-wide state, just like the
   custom fields — everyone viewing the board sees the same one.
-- **Delete** — tap the × button in a note's header.
+- **Delete** — tap the × button in a note's header, or select one or more
+  notes (see "Select multiple notes" above) and press Delete/Backspace.
 - **Photo to notes** — tap 📷 (bottom-left, above **+**) to snap or pick a
   photo of a handwritten or printed to-do list; each item it finds
   becomes its own note, arranged in a grid at your current view.
   Requires the Worker's `ANTHROPIC_API_KEY` to be set (see Deploying).
 - **Clear the board** — from the hamburger menu (☰, top right); wipes
   every note for everyone and can't be undone.
-- **Pan** — drag empty board space, or two-finger drag / scroll on a
-  trackpad or mouse wheel.
-- **Zoom** — pinch, ctrl/cmd+scroll, or the +/− buttons; the ⤢ button
-  fits everything on screen.
+- **Pan** — hold Space and drag with a mouse (a plain drag on empty board
+  space is the lasso instead — see "Select multiple notes" above); a
+  two-finger drag pans on its own, no Space needed, on a trackpad or a
+  touchscreen.
+- **Zoom** — pinch (touch or trackpad), ctrl/cmd+scroll, or the +/−
+  buttons; the ⤢ button fits everything on screen.
 
 Not in this pass: connectors between notes — a natural next addition rather
 than being folded in here. (Per-browser identity — name, initials, color,
