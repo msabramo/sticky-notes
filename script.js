@@ -575,11 +575,26 @@
     zoomAround(rect.left + w / 2, rect.top + h / 2, factor);
   }
 
+  function panBy(dx, dy) {
+    camera.x += dx / camera.scale;
+    camera.y += dy / camera.scale;
+    applyCameraTransform();
+  }
+
   boardWrap.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      zoomAround(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+      if (e.ctrlKey) {
+        // Browsers report a trackpad pinch gesture as a wheel event with ctrlKey
+        // set (there's no separate "pinch" DOM event) -- this also covers an
+        // actual ctrl/cmd+scroll from a mouse wheel.
+        zoomAround(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+      } else {
+        // Two-finger trackpad drag / plain wheel scroll -- pan instead of zoom,
+        // since pinch already covers zoom on trackpads.
+        panBy(e.deltaX, e.deltaY);
+      }
     },
     { passive: false }
   );

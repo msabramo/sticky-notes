@@ -132,11 +132,12 @@ same coordinate space, so notes always line up between devices.
   Requires the Worker's `ANTHROPIC_API_KEY` to be set (see Deploying).
 - **Clear the board** — from the hamburger menu (☰, top right); wipes
   every note for everyone and can't be undone.
-- **Pan** — hold Space and drag (a plain drag on empty board space is the
-  lasso — see "Select multiple notes" above), or use two fingers on a
-  touch/trackpad device.
-- **Zoom** — pinch, scroll, or the +/− buttons; the ⤢ button fits
-  everything on screen.
+- **Pan** — hold Space and drag with a mouse (a plain drag on empty board
+  space is the lasso instead — see "Select multiple notes" above); a
+  two-finger drag pans on its own, no Space needed, on a trackpad or a
+  touchscreen.
+- **Zoom** — pinch (touch or trackpad), ctrl/cmd+scroll, or the +/−
+  buttons; the ⤢ button fits everything on screen.
 
 Not in this pass: connectors between notes — a natural next addition rather
 than being folded in here. (Per-browser identity — name, initials, color,
