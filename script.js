@@ -56,6 +56,7 @@
   const identityColorRow = document.getElementById("identityColorRow");
   const presenceRow = document.getElementById("presenceRow");
   const bgSwatches = document.getElementById("bgSwatches");
+  const skewNotesCheckbox = document.getElementById("skewNotesCheckbox");
 
   const WORLD_W = 3000;
   const WORLD_H = 2000;
@@ -660,6 +661,28 @@
       if (!btn) return;
       applyBoardBackground(btn.dataset.bg);
       MP.sendBackground(boardBackground);
+    });
+  }
+
+  // ---------- Note rotation skew ----------
+  // Whether newly-created notes get a small random rotation for the
+  // sticky-note look, or sit perfectly straight. A per-viewer preference
+  // (like identity), not board-wide state: it only affects notes you
+  // personally create, and each note's chosen rotation still travels with
+  // it to every peer regardless of their own setting.
+  const SKEW_NOTES_KEY = "sticky-notes:skewNotes";
+  let skewNotes = true;
+  try {
+    const saved = localStorage.getItem(SKEW_NOTES_KEY);
+    if (saved !== null) skewNotes = saved === "1";
+  } catch (err) { /* storage unavailable -- default to on */ }
+  if (skewNotesCheckbox) {
+    skewNotesCheckbox.checked = skewNotes;
+    skewNotesCheckbox.addEventListener("change", () => {
+      skewNotes = skewNotesCheckbox.checked;
+      try {
+        localStorage.setItem(SKEW_NOTES_KEY, skewNotes ? "1" : "0");
+      } catch (err) { /* storage unavailable -- setting just won't persist */ }
     });
   }
 
@@ -2591,7 +2614,7 @@
       h: NOTE_H,
       color: COLORS[Math.floor(Math.random() * COLORS.length)],
       html: text ? sanitizeHtml(legacyTextToHtml(text)) : "",
-      rot: Math.round((Math.random() * 8 - 4) * 10) / 10,
+      rot: skewNotes ? Math.round((Math.random() * 8 - 4) * 10) / 10 : 0,
       z: zCounter,
       fields: {},
     };
@@ -2636,7 +2659,7 @@
           color: "transparent",
           kind: "image",
           img: dataUrl,
-          rot: Math.round((Math.random() * 6 - 3) * 10) / 10,
+          rot: skewNotes ? Math.round((Math.random() * 6 - 3) * 10) / 10 : 0,
           z: zCounter,
           fields: {},
         };
