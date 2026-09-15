@@ -22,6 +22,8 @@
   const createColumnsFromFieldBtn = document.getElementById("createColumnsFromFieldBtn");
   const drawZoneBtn = document.getElementById("drawZoneBtn");
   const copyLinkBtn = document.getElementById("copyLinkBtn");
+  const copyViewLinkBtn = document.getElementById("copyViewLinkBtn");
+  const revokeViewLinkBtn = document.getElementById("revokeViewLinkBtn");
   const boardCodeEl = document.getElementById("boardCode");
   const connDot = document.getElementById("connDot");
   const colorPopover = document.getElementById("colorPopover");
@@ -58,6 +60,16 @@
   const identityColorRow = document.getElementById("identityColorRow");
   const presenceRow = document.getElementById("presenceRow");
   const bgSwatches = document.getElementById("bgSwatches");
+
+  // A "?view=<token>" URL joins read-only: see MP.viewLinkUrl/connect below
+  // for how the token maps to a board server-side, and the "body.read-only"
+  // rules in style.css for the UI this flag hides. Blocking edits is also
+  // enforced server-side (see worker/index.ts's READ_ONLY_BLOCKED_TYPES) --
+  // this flag just keeps the client from offering controls the server would
+  // reject anyway.
+  const VIEW_TOKEN = new URLSearchParams(location.search).get("view");
+  const READ_ONLY = !!VIEW_TOKEN;
+  if (READ_ONLY) document.body.classList.add("read-only");
 
   const WORLD_W = 3000;
   const WORLD_H = 2000;
@@ -634,6 +646,37 @@
     });
   }
 
+  if (copyViewLinkBtn) {
+    copyViewLinkBtn.addEventListener("click", async () => {
+      const original = copyViewLinkBtn.textContent;
+      copyViewLinkBtn.textContent = "…";
+      const url = await MP.viewLinkUrl();
+      copyViewLinkBtn.textContent = original;
+      if (!url) {
+        alert("Couldn't create a read-only link. Try again.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(url);
+        copyViewLinkBtn.textContent = "Copied!";
+        setTimeout(() => { copyViewLinkBtn.textContent = original; }, 1400);
+      } catch (err) {
+        prompt("Copy this read-only link to share:", url);
+      }
+    });
+  }
+
+  if (revokeViewLinkBtn) {
+    revokeViewLinkBtn.addEventListener("click", async () => {
+      if (!confirm("Revoke this board's read-only link? Anyone currently viewing it will be disconnected, and the link will stop working.")) return;
+      const original = revokeViewLinkBtn.textContent;
+      revokeViewLinkBtn.textContent = "…";
+      const ok = await MP.revokeViewLink();
+      revokeViewLinkBtn.textContent = original;
+      if (!ok) alert("Couldn't revoke the read-only link. Try again.");
+    });
+  }
+
   clearBtn.addEventListener("click", () => {
     if (!confirm("Clear every note on this board for everyone?")) return;
     const snapshot = [...notes.values()];
@@ -904,6 +947,7 @@
       // pointerdown handler below checks the same hit test and steps aside
       // for it instead of starting a note drag.
       editor.addEventListener("mousedown", (e) => {
+        if (READ_ONLY) return;
         const li = checklistCheckboxHit(e);
         if (!li || !editor.contains(li)) return;
         e.preventDefault();
@@ -1331,6 +1375,7 @@
   // delete done without ever blurring it, and *that* shouldn't get eaten
   // just because the caret happens to still be sitting in the text.
   window.addEventListener("keydown", (e) => {
+    if (READ_ONLY) return;
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
     const key = e.key.toLowerCase();
@@ -1564,6 +1609,7 @@
   // the click that triggered edit mode rather than always at the start of
   // the text.
   function enterEditMode(id, clientX, clientY) {
+    if (READ_ONLY) return;
     selectNote(id);
     const refs = noteEls.get(id);
     if (!refs) return;
@@ -3137,6 +3183,7 @@
   });
 
   boardWrap.addEventListener("dblclick", (e) => {
+    if (READ_ONLY) return;
     if (isUiChrome(e.target) || e.target.closest(".note") || e.target.closest(".zone-header") || e.target.closest(".zone-resize")) return;
     const p = screenToWorld(e.clientX, e.clientY);
     addNote(p.x, p.y);
@@ -3297,8 +3344,11 @@
 
     // Holding Space always pans -- checked ahead of every other hit-test so
     // it overrides dragging a note/zone or starting a lasso, no matter
-    // what's under the pointer.
-    if (spacePanActive) {
+    // what's under the pointer. A read-only view behaves the same way at
+    // all times: every note/zone drag, resize, and draw-a-zone branch below
+    // is a mutation, so skip straight to the pan fallback instead of arming
+    // any of them.
+    if (spacePanActive || READ_ONLY) {
       panPointerId = e.pointerId;
       panAnchorWorld = screenToWorld(e.clientX, e.clientY);
       boardWrap.classList.add("panning");
@@ -3708,6 +3758,7 @@
   // sitting in a text field somewhere (a note being edited, an input in a
   // popover/modal) where the key should just edit text instead.
   document.addEventListener("keydown", (e) => {
+    if (READ_ONLY) return;
     if (e.key !== "Delete" && e.key !== "Backspace") return;
     if (editingNoteId) return;
     const active = document.activeElement;
@@ -3752,6 +3803,40 @@
         history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
       }
       return id;
+    }
+
+    // Asks the worker to mint (or hand back the existing) read-only view
+    // token for this board and turns it into a shareable URL. Returns null
+    // if the worker host isn't configured or the request fails -- same
+    // condition connect() and visionUrl() check.
+    async function viewLinkUrl() {
+      const host = workerHost();
+      if (!host || host.includes("YOUR-")) return null;
+      try {
+        const res = await fetch(`${httpProtocolFor(host)}://${host}/board/${boardId}/view-link`, { method: "POST" });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data || typeof data.token !== "string") return null;
+        return `${location.origin}${location.pathname}?view=${data.token}`;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    // Un-mints this board's read-only view token (if it has one): the
+    // server both forgets it (so shared links stop resolving) and drops
+    // any read-only socket already connected with it. Returns false only on
+    // a network/request failure -- there being no token to revoke yet still
+    // counts as success, same as viewLinkUrl minting one lazily on first use.
+    async function revokeViewLink() {
+      const host = workerHost();
+      if (!host || host.includes("YOUR-")) return false;
+      try {
+        const res = await fetch(`${httpProtocolFor(host)}://${host}/board/${boardId}/view-link`, { method: "DELETE" });
+        return res.ok;
+      } catch (err) {
+        return false;
+      }
     }
 
     function workerHost() {
@@ -3804,16 +3889,24 @@
       }
       const proto = wsProtocolFor(host);
       setConnDot("connecting");
-      ws = new WebSocket(`${proto}://${host}/board/${boardId}`);
+      ws = new WebSocket(READ_ONLY ? `${proto}://${host}/view/${VIEW_TOKEN}` : `${proto}://${host}/board/${boardId}`);
       ws.onopen = () => {
         reconnectDelay = 1000;
         setConnDot("connected");
         sendIdentity();
       };
-      ws.onclose = () => {
-        setConnDot("disconnected");
+      ws.onclose = (e) => {
         onlineConnToUser.clear();
         renderPresenceRow();
+        // A deliberate server-initiated close (clean code + a reason string)
+        // while viewing read-only means the link was just revoked -- a
+        // fresh /view/<token> handshake would only 404, so don't loop
+        // reconnect attempts against a link that's gone for good.
+        if (READ_ONLY && e.code === 1000 && e.reason) {
+          setConnDot("disconnected", e.reason);
+          return;
+        }
+        setConnDot("disconnected");
         scheduleReconnect();
       };
       ws.onerror = () => {
@@ -3982,6 +4075,11 @@
     }
 
     function send(obj) {
+      // Belt-and-suspenders alongside the UI-level guards above and the
+      // server's own READ_ONLY_BLOCKED_TYPES check: a read-only view never
+      // puts anything but a cursor position or a self-reported identity on
+      // the wire, no matter what triggered this call.
+      if (READ_ONLY && obj.t !== "cursor" && obj.t !== "identity") return;
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
     }
 
@@ -3998,8 +4096,12 @@
     }
 
     function init() {
-      boardId = resolveBoardId();
-      if (boardCodeEl) boardCodeEl.textContent = boardId;
+      if (READ_ONLY) {
+        if (boardCodeEl) boardCodeEl.textContent = "read-only";
+      } else {
+        boardId = resolveBoardId();
+        if (boardCodeEl) boardCodeEl.textContent = boardId;
+      }
       connect();
     }
 
@@ -4007,6 +4109,8 @@
       init,
       tick,
       visionUrl,
+      viewLinkUrl,
+      revokeViewLink,
       sendCreate: (note) => send({ t: "create", ...note }),
       sendMove: (id, x, y, z) => send({ t: "move", id, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, z }),
       sendUpdate: (id, fields) => send({ t: "update", id, ...fields }),

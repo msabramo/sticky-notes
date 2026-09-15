@@ -4,7 +4,13 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-09-12",
   "durable_objects": {
-    "bindings": [{ "name": "BOARD", "class_name": "NotesBoard" }]
+    "bindings": [
+      { "name": "BOARD", "class_name": "NotesBoard" },
+      { "name": "REGISTRY", "class_name": "ViewRegistry" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["NotesBoard"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["NotesBoard"] },
+    { "tag": "v2", "new_sqlite_classes": ["ViewRegistry"] }
+  ]
 }

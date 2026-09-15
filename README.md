@@ -124,6 +124,20 @@ same coordinate space, so notes always line up between devices.
   Grid (the default dotted-grid look), Whiteboard, Chalkboard, or Pinboard
   (a linen/cork texture). It's shared board-wide state, just like the
   custom fields — everyone viewing the board sees the same one.
+- **Read-only link** — from the hamburger menu, **Copy Read-only Link**
+  copies a separate link that lets whoever you send it to watch the board
+  update live (notes, cursors, presence, everything) without being able to
+  add, move, edit, delete, or clear anything, change the background, or
+  touch fields or zones -- its menu collapses to just that link and "Start
+  a New Board". Unlike the regular invite link, it doesn't hand out the
+  board's own id: it's a separate, unguessable token the server resolves
+  back to the board on the way in, so there's no query string to edit or
+  strip to regain edit access. The same link is returned every time you tap
+  the button, so it's safe to generate once and reuse. **Revoke Read-only
+  Link**, right below it, immediately disconnects anyone currently using
+  that link and invalidates it -- the next **Copy Read-only Link** hands
+  out an unrelated new one, so a leaked link can be cut off without
+  touching the board's own contents or its edit link.
 - **Delete** — tap the × button in a note's header, or select one or more
   notes (see "Select multiple notes" above) and press Delete/Backspace.
 - **Photo to notes** — tap 📷 (bottom-left, above **+**) to snap or pick a
@@ -181,6 +195,31 @@ This runs on Cloudflare's **Workers Free plan** — Durable Objects
 (SQLite-backed) are included at no cost, no credit card required, with
 limits (100k requests/day, 5GB storage) far beyond what a hobby board
 needs.
+
+### Read-only links
+
+A second Durable Object, `ViewRegistry` (always addressed by the fixed name
+`"global"`), maps read-only view tokens to the board id they were minted
+for -- the one piece of state that isn't scoped to a single board, since a
+token has to resolve to a board *before* the Worker knows which `NotesBoard`
+to talk to. `POST /board/<board-id>/view-link` mints (or returns the
+board's existing) token, stored on the board itself so "Clear Board" and
+repeat requests both leave it alone, and registers it with `ViewRegistry`.
+Connecting a WebSocket to `/view/<token>` instead of `/board/<board-id>`
+resolves the token back to a board id through that registry, then forwards
+into the same `NotesBoard` instance with a flag marking the connection
+read-only. That connection's `webSocketMessage` handler drops any message
+that would mutate the board (create/move/update/delete/clear/fields/
+background) before it's ever stored or broadcast, regardless of what the
+sending client's own UI does or doesn't allow -- the frontend also hides
+every editing control in this mode, but that's a UI nicety on top of, not a
+substitute for, the server-side check.
+
+`DELETE /board/<board-id>/view-link` revokes the board's current token, if
+it has one: `ViewRegistry` forgets it (so `/view/<old-token>` 404s on the
+very next request) and any already-connected read-only sockets are closed
+server-side via `ctx.getWebSockets()`, so a revoke disconnects existing
+viewers rather than only blocking new ones from joining.
 
 ### Photo-to-notes (Claude vision)
 

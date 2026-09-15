@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap" />
-  <link rel="stylesheet" href="style.css?v=12" />
+  <link rel="stylesheet" href="style.css?v=14" />
 </head>
 <body>
   <div class="app">
@@ -118,12 +118,14 @@
 
   <div class="menu-backdrop no-print" id="menuBackdrop"></div>
   <aside class="menu-drawer no-print" id="menuDrawer">
-    <div class="menu-section">
+    <div class="menu-section" id="boardMenuSection">
       <span class="room-label">Board <b id="boardCode">------</b></span>
       <button id="copyLinkBtn" class="btn">🔗 Copy Invite Link</button>
+      <button id="copyViewLinkBtn" class="btn">👀 Copy Read-only Link</button>
+      <button id="revokeViewLinkBtn" class="btn danger">🚫 Revoke Read-only Link</button>
     </div>
     <div class="menu-divider"></div>
-    <div class="menu-section">
+    <div class="menu-section" id="bgMenuSection">
       <span class="menu-section-label">Background</span>
       <div class="bg-swatches" id="bgSwatches">
         <button type="button" class="bg-swatch" data-bg="grid" title="Grid">
@@ -159,7 +161,7 @@
       </div>
     </div>
     <div class="menu-divider"></div>
-    <div class="menu-section">
+    <div class="menu-section" id="zonesMenuSection">
       <span class="menu-section-label">Zones</span>
       <button id="createColumnsBtn" class="btn">▥ Create Columns…</button>
       <button id="createColumnsFromFieldBtn" class="btn">🏷▥ Create Columns from Field…</button>
@@ -172,7 +174,7 @@
       <a href="?" id="newBoardLink" class="btn">✨ Start a New Board</a>
     </div>
     <div class="menu-divider"></div>
-    <p class="menu-hint">Tap + to add a note. A note drags from anywhere on it; tap an already-selected note to start typing, and drag its bottom-right corner to resize it. Use the ● button (visible while typing) to change its color, including a checkered "transparent" swatch that makes a note read as text or an image sitting right on the board instead of a sticky note. While typing, use the formatting toolbar: font, size, text color, bold/italic/underline/strikethrough, headings, bullet/numbered/checklist lists, links, alignment, indent, and images — select some text first to format just that part or to turn it into a link; with nothing selected, an inserted image drops in at your cursor. Tap a checklist item's checkbox to check it off. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields — including a Person(s) field that auto-fills from everyone who's used this board, optionally allowing more than one person and/or a freely-typed name for someone not on the board). Tap the circle next to ☰ to set your name, initials, and color so others can tell who's who. Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Tap 🖼️ to drop a photo straight onto the board as its own resizable, rotatable tile (handy for vision boards or mood boards) -- tap it and tap the 🖼 button in its header to swap the photo. Use "Create Columns…" to lay out a kanban-style board (e.g. To do, In progress, Done), or "Draw a Zone" to drag out your own labeled region — tap a zone's label to rename it or its × to remove it, and drag its bottom-right corner to resize it. "Create Columns from Field…" makes one column per option of a select field (e.g. Assignee) and keeps them in sync both ways: drop a note in a column and its field updates to match, or change the field on a note and it hops to that column. Dropped notes auto-stack into an open spot in whichever column or zone they land in — drop near the top, bottom, or between two notes to choose where; hold Option (Alt) while dropping to place a note freely instead. Everyone with the invite link edits this same board live. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
+    <p class="menu-hint">Tap + to add a note. A note drags from anywhere on it; tap an already-selected note to start typing, and drag its bottom-right corner to resize it. Use the ● button (visible while typing) to change its color, including a checkered "transparent" swatch that makes a note read as text or an image sitting right on the board instead of a sticky note. While typing, use the formatting toolbar: font, size, text color, bold/italic/underline/strikethrough, headings, bullet/numbered/checklist lists, links, alignment, indent, and images — select some text first to format just that part or to turn it into a link; with nothing selected, an inserted image drops in at your cursor. Tap a checklist item's checkbox to check it off. Use the 🏷 button on a note to set custom fields (status, assignee, tags, or whatever you define in Manage Fields — including a Person(s) field that auto-fills from everyone who's used this board, optionally allowing more than one person and/or a freely-typed name for someone not on the board). Tap the circle next to ☰ to set your name, initials, and color so others can tell who's who. Tap 📷 to snap a photo of a handwritten or printed to-do list and turn each item into its own note. Tap 🖼️ to drop a photo straight onto the board as its own resizable, rotatable tile (handy for vision boards or mood boards) -- tap it and tap the 🖼 button in its header to swap the photo. Use "Create Columns…" to lay out a kanban-style board (e.g. To do, In progress, Done), or "Draw a Zone" to drag out your own labeled region — tap a zone's label to rename it or its × to remove it, and drag its bottom-right corner to resize it. "Create Columns from Field…" makes one column per option of a select field (e.g. Assignee) and keeps them in sync both ways: drop a note in a column and its field updates to match, or change the field on a note and it hops to that column. Dropped notes auto-stack into an open spot in whichever column or zone they land in — drop near the top, bottom, or between two notes to choose where; hold Option (Alt) while dropping to place a note freely instead. Everyone with the invite link edits this same board live. Use "Copy Read-only Link" to share a link that lets someone watch the board update live without being able to change anything; "Revoke Read-only Link" immediately disconnects anyone using it and invalidates the link, so the next "Copy Read-only Link" hands out a fresh one. Pinch, scroll, or use the +/− buttons to zoom; drag empty space to pan.</p>
   </aside>
 
   <div class="fields-modal-backdrop no-print" id="fieldsModalBackdrop"></div>
@@ -188,6 +190,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=12"></script>
+  <script src="script.js?v=14"></script>
 </body>
 </html>
