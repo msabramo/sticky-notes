@@ -407,7 +407,12 @@ body {
 
 .board-wrap.drawing-zone { cursor: crosshair; }
 
-/* Shift-drag marquee for multi-selecting notes (see the boardWrap
+/* Holding Space pans the board (see the keydown/keyup listeners in
+   script.js) -- grab/grabbing signals that the way it does on a note. */
+.board-wrap.space-pan { cursor: grab; }
+.board-wrap.space-pan.panning { cursor: grabbing; }
+
+/* Plain-drag marquee for multi-selecting notes (see the boardWrap
    pointerdown/pointermove/pointerup handlers in script.js). Sits above
    notes/zones so it's visible while dragging over them. */
 .lasso-preview {

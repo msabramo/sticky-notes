@@ -59,11 +59,11 @@ same coordinate space, so notes always line up between devices.
   typing; only the header initiates a drag, so starting to type never
   fights with starting to drag.)
 - **Select multiple notes** — Ctrl/Cmd-click each note to add or remove it
-  from the selection, or hold Shift and drag across empty board space to
-  draw a lasso around a group. Drag any note in the selection to move them
-  all together, each still snapping into its own zone independently on
-  drop. Press **Delete**/**Backspace** to remove every selected note at
-  once (only while you're not actively typing in one).
+  from the selection, or drag across empty board space to draw a lasso
+  around a group. Drag any note in the selection to move them all together,
+  each still snapping into its own zone independently on drop. Press
+  **Delete**/**Backspace** to remove every selected note at once (only
+  while you're not actively typing in one).
 - **Edit text** — tap/click the note's body.
 - **Resize a note** — drag the small grip in its bottom-right corner.
 - **Recolor** — tap the ● button in a note's header for a small palette.
@@ -132,7 +132,9 @@ same coordinate space, so notes always line up between devices.
   Requires the Worker's `ANTHROPIC_API_KEY` to be set (see Deploying).
 - **Clear the board** — from the hamburger menu (☰, top right); wipes
   every note for everyone and can't be undone.
-- **Pan** — drag empty board space.
+- **Pan** — hold Space and drag (a plain drag on empty board space is the
+  lasso — see "Select multiple notes" above), or use two fingers on a
+  touch/trackpad device.
 - **Zoom** — pinch, scroll, or the +/− buttons; the ⤢ button fits
   everything on screen.
 

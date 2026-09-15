@@ -2894,6 +2894,12 @@
   let pinch = null;
   let panPointerId = null;
   let panAnchorWorld = null;
+  // Holding Space pans on drag, overriding note/zone drag and lasso-select
+  // -- the Figma/Miro convention -- while a plain drag on empty board space
+  // is the lasso (see the boardWrap pointerdown handler below). Tracked via
+  // keydown/keyup rather than checking e.getModifierState in the pointer
+  // handlers, since spacebar isn't reported as a event.shiftKey-style flag.
+  let spacePanActive = false;
   let dragPointerId = null;
   let dragNoteId = null; // the note under the pointer -- drives dragOffset/positioning
   let dragGroupIds = []; // every note moving together (dragNoteId plus the rest of the selection, when it's part of one)
@@ -2916,7 +2922,7 @@
   let zoneDrawPointerId = null;
   let zoneDrawStart = null;
   let zoneDrawPreviewEl = null;
-  // Shift-drag on empty board space: draws a marquee rectangle and, on
+  // Plain drag on empty board space: draws a marquee rectangle and, on
   // release, selects every note it overlaps -- see the boardWrap
   // pointerdown/pointermove/pointerup handlers below.
   let lassoPointerId = null;
@@ -2959,6 +2965,7 @@
     dragCollapseOnClick = false;
     panPointerId = null;
     panAnchorWorld = null;
+    boardWrap.classList.remove("panning");
     resizeNoteId = null;
     resizePointerId = null;
     resizeStart = null;
@@ -2990,6 +2997,31 @@
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
   }
 
+  function isEditableTarget(el) {
+    return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+  }
+
+  function setSpacePan(active) {
+    spacePanActive = active;
+    boardWrap.classList.toggle("space-pan", active);
+    if (!active) boardWrap.classList.remove("panning");
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" || e.repeat || spacePanActive) return;
+    if (isEditableTarget(document.activeElement)) return; // let it type a space instead
+    setSpacePan(true);
+    e.preventDefault(); // stop the page from scrolling
+  });
+  document.addEventListener("keyup", (e) => {
+    if (e.code !== "Space") return;
+    setSpacePan(false);
+  });
+  // No keyup reaches us if focus leaves the window entirely (alt-tab,
+  // devtools, a native file/color picker) while Space is still held --
+  // drop pan mode rather than leave it stuck on.
+  window.addEventListener("blur", () => setSpacePan(false));
+
   boardWrap.addEventListener("pointerdown", (e) => {
     if (isUiChrome(e.target)) return;
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -3000,6 +3032,17 @@
       return;
     }
     if (activePointers.size > 2) return;
+
+    // Holding Space always pans -- checked ahead of every other hit-test so
+    // it overrides dragging a note/zone or starting a lasso, no matter
+    // what's under the pointer.
+    if (spacePanActive) {
+      panPointerId = e.pointerId;
+      panAnchorWorld = screenToWorld(e.clientX, e.clientY);
+      boardWrap.classList.add("panning");
+      e.preventDefault();
+      return;
+    }
 
     const resizeEl = e.target.closest(".note-resize");
     if (resizeEl) {
@@ -3113,28 +3156,20 @@
       return;
     }
 
-    // Shift-drag on empty board space draws a marquee ("lasso") that
-    // selects every note it overlaps on release -- kept behind a modifier
-    // so a plain drag still pans, per the documented "drag empty board
-    // space to pan" gesture.
-    if (e.shiftKey) {
-      const p = screenToWorld(e.clientX, e.clientY);
-      lassoStart = p;
-      lassoPointerId = e.pointerId;
-      lassoPreviewEl = document.createElement("div");
-      lassoPreviewEl.className = "lasso-preview";
-      lassoPreviewEl.style.left = p.x + "px";
-      lassoPreviewEl.style.top = p.y + "px";
-      lassoPreviewEl.style.width = "0px";
-      lassoPreviewEl.style.height = "0px";
-      world.insertBefore(lassoPreviewEl, cursorsEl);
-      e.preventDefault();
-      return;
-    }
-
-    panPointerId = e.pointerId;
-    panAnchorWorld = screenToWorld(e.clientX, e.clientY);
-    deselectNote();
+    // A plain drag on empty board space draws a marquee ("lasso") that
+    // selects every note it overlaps on release; hold Space to pan instead
+    // (handled above, ahead of every hit-test).
+    const p = screenToWorld(e.clientX, e.clientY);
+    lassoStart = p;
+    lassoPointerId = e.pointerId;
+    lassoPreviewEl = document.createElement("div");
+    lassoPreviewEl.className = "lasso-preview";
+    lassoPreviewEl.style.left = p.x + "px";
+    lassoPreviewEl.style.top = p.y + "px";
+    lassoPreviewEl.style.width = "0px";
+    lassoPreviewEl.style.height = "0px";
+    world.insertBefore(lassoPreviewEl, cursorsEl);
+    e.preventDefault();
   });
 
   window.addEventListener("pointermove", (e) => {
@@ -3320,6 +3355,7 @@
     if (panPointerId === e.pointerId) {
       panPointerId = null;
       panAnchorWorld = null;
+      boardWrap.classList.remove("panning");
     }
     if (zoneDragId && e.pointerId === zoneDragPointerId) {
       const zone = zones.get(zoneDragId);
