@@ -3015,6 +3015,7 @@
     let ws = null;
     let boardId = "";
     let reconnectDelay = 1000;
+    let reconnectTimer = null;
     const remoteCursorEls = new Map(); // fromId -> element
     const remoteLastSeen = new Map();
     let lastCursorSent = 0;
@@ -3076,6 +3077,10 @@
     }
 
     function connect() {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       const host = workerHost();
       if (!host || host.includes("YOUR-")) {
         setConnDot("disconnected", "Multiplayer isn't configured yet — see README.md. Notes still work locally.");
@@ -3091,10 +3096,9 @@
       };
       ws.onclose = () => {
         setConnDot("disconnected");
-        setTimeout(connect, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 1.6, 15000);
         onlineConnToUser.clear();
         renderPresenceRow();
+        scheduleReconnect();
       };
       ws.onerror = () => {
         try { ws.close(); } catch (err) { /* already closing */ }
@@ -3105,6 +3109,33 @@
         handleMessage(msg);
       };
     }
+
+    // Skip reconnecting while the tab is hidden: nobody's watching this
+    // board, so there's nothing to sync live, and a background tab still
+    // retrying every few seconds is exactly the traffic pattern that trips
+    // Cloudflare's workers.dev rate limiting when many tabs do it at once.
+    // The visibilitychange listener below reconnects right away once the
+    // tab is looked at again.
+    function scheduleReconnect() {
+      if (document.hidden) return;
+      reconnectTimer = setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 1.6, 15000);
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          ws.close();
+        }
+      } else if (!ws || ws.readyState === WebSocket.CLOSED) {
+        reconnectDelay = 1000;
+        connect();
+      }
+    });
 
     function handleMessage(msg) {
       switch (msg.t) {
