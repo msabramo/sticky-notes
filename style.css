@@ -371,6 +371,19 @@ body {
 
 .board-wrap.drawing-zone { cursor: crosshair; }
 
+/* Dragging an image file over the board (script.js's dragover/drop
+   handlers) -- an inset outline so it reads at any zoom level without
+   shifting layout the way a border would. */
+.board-wrap.drag-over-image::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  outline: 3px dashed var(--accent);
+  outline-offset: -3px;
+}
+
 /* ---------- Sticky note ---------- */
 /* A note not being edited is a drag target everywhere on it (see the
    boardWrap pointerdown handler in script.js) -- grab/grabbing communicates
@@ -522,6 +535,11 @@ body {
 
 .note.selected {
   outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.note.drag-over-image-target {
+  outline: 2px dashed var(--accent);
   outline-offset: 2px;
 }
 

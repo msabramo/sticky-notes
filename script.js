@@ -1734,6 +1734,100 @@
     }
   });
 
+  // ---------- Drag & drop images ----------
+  // Dropping image file(s) onto an existing note inserts them into that note
+  // (same insertImageIntoNote path as the toolbar button, just targeting the
+  // end of the note instead of a caret position); dropping onto empty board
+  // space creates one new note per image, arranged in a grid centered on the
+  // drop point the way a photo-scan batch is centered on the viewport.
+  const dragHasFiles = (dt) => !!dt && Array.from(dt.types || []).includes("Files");
+
+  // Dropping a file anywhere the app doesn't handle it (the topbar, outside
+  // the window) would otherwise have the browser navigate to it, discarding
+  // the board; swallow those too so only boardWrap's own handler below acts.
+  window.addEventListener("dragover", (e) => {
+    if (dragHasFiles(e.dataTransfer)) e.preventDefault();
+  });
+  window.addEventListener("drop", (e) => {
+    if (dragHasFiles(e.dataTransfer)) e.preventDefault();
+  });
+
+  function clearDragOverStyling() {
+    boardWrap.classList.remove("drag-over-image");
+    const target = boardWrap.querySelector(".note.drag-over-image-target");
+    if (target) target.classList.remove("drag-over-image-target");
+  }
+
+  boardWrap.addEventListener("dragover", (e) => {
+    if (!dragHasFiles(e.dataTransfer) || isUiChrome(e.target)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    boardWrap.classList.add("drag-over-image");
+    const noteEl = e.target.closest(".note");
+    const prevTarget = boardWrap.querySelector(".note.drag-over-image-target");
+    if (prevTarget && prevTarget !== noteEl) prevTarget.classList.remove("drag-over-image-target");
+    if (noteEl) noteEl.classList.add("drag-over-image-target");
+  });
+
+  boardWrap.addEventListener("dragleave", (e) => {
+    if (!boardWrap.contains(e.relatedTarget)) clearDragOverStyling();
+  });
+
+  boardWrap.addEventListener("drop", async (e) => {
+    if (!dragHasFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    const targetNoteEl = e.target.closest(".note");
+    const uiChrome = isUiChrome(e.target);
+    clearDragOverStyling();
+    if (uiChrome) return;
+
+    const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+
+    if (targetNoteEl) {
+      const id = targetNoteEl.dataset.id;
+      for (const file of files) {
+        try {
+          const dataUrl = await pickCompressedImageDataUrl(file);
+          if (dataUrl.length > MAX_NOTE_IMAGE_DATA_URL_LEN) {
+            alert("That image is too large even after compressing. Try a smaller photo.");
+            continue;
+          }
+          imageInsertRange = null; // insert at the end of the note, not a stale caret position
+          insertImageIntoNote(id, dataUrl);
+        } catch (err) {
+          alert((err && err.message) || "Couldn't insert that image.");
+        }
+      }
+      return;
+    }
+
+    const drop = screenToWorld(e.clientX, e.clientY);
+    const cols = Math.max(1, Math.ceil(Math.sqrt(files.length)));
+    const rows = Math.ceil(files.length / cols);
+    const gapX = NOTE_W + 20;
+    const gapY = NOTE_H + 20;
+    const startX = drop.x - ((cols - 1) * gapX) / 2;
+    const startY = drop.y - ((rows - 1) * gapY) / 2;
+
+    for (let i = 0; i < files.length; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      try {
+        const dataUrl = await pickCompressedImageDataUrl(files[i]);
+        if (dataUrl.length > MAX_NOTE_IMAGE_DATA_URL_LEN) {
+          alert("That image is too large even after compressing. Try a smaller photo.");
+          continue;
+        }
+        const id = addNote(startX + col * gapX, startY + row * gapY, "", { enterEdit: false });
+        imageInsertRange = null;
+        insertImageIntoNote(id, dataUrl);
+      } catch (err) {
+        alert((err && err.message) || "Couldn't insert that image.");
+      }
+    }
+  });
+
   // Shows the format toolbar for a note -- only ever called by enterEditMode
   // (clicking an already-selected note), never by hover or plain selection,
   // so it doesn't pop up while the user is just dragging a note around.
@@ -2512,7 +2606,11 @@
   renderFieldsPresets();
 
   // ---------- Adding notes ----------
-  function addNote(worldX, worldY, text) {
+  // `opts.enterEdit` overrides the default (blank note -> edit mode) for
+  // callers that fill the note in themselves right after creating it, e.g. a
+  // batch of dropped images, which shouldn't steal focus/edit mode from each
+  // other any more than a photo-scan batch does.
+  function addNote(worldX, worldY, text, opts) {
     const id = makeId();
     zCounter += 1;
     const note = {
@@ -2529,10 +2627,8 @@
     };
     addNoteLocally(note);
     MP.sendCreate(note);
-    // A blank note is created for immediate typing, so it should go straight
-    // into edit mode; a batch of notes from a photo scan shouldn't steal
-    // focus/edit mode from any of them.
-    if (!text) enterEditMode(id);
+    const enterEdit = opts && "enterEdit" in opts ? opts.enterEdit : !text;
+    if (enterEdit) enterEditMode(id);
     return id;
   }
 
