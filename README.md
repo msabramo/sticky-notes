@@ -124,7 +124,12 @@ same coordinate space, so notes always line up between devices.
   becomes its own note, arranged in a grid at your current view.
   Requires the Worker's `ANTHROPIC_API_KEY` to be set (see Deploying).
 - **Clear the board** — from the hamburger menu (☰, top right); wipes
-  every note for everyone and can't be undone.
+  every note for everyone.
+- **Undo / redo** — Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or the ↶/↷ buttons,
+  top-left), for creating, deleting, moving, resizing, or recoloring a
+  note, drawing/moving/resizing/deleting a zone, and Clear Board. Covers
+  only actions made in *this browser*, not anyone else's; see "Known
+  limitations" below.
 - **Pan** — drag empty board space, or two-finger drag / scroll on a
   trackpad or mouse wheel.
 - **Zoom** — pinch, ctrl/cmd+scroll, or the +/− buttons; the ⤢ button
@@ -235,7 +240,13 @@ automatically, no `wrangler secret put` needed for local runs).
   Names/initials/colors (see "Your name" above) are entirely
   self-reported and unverified, same as everything else on a board — a
   display convenience, not an identity anyone else can trust.
-- No per-user undo; deletes and clears are immediate and shared.
+- Undo/redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, or the ↶/↷ buttons) only covers
+  *this browser's own* recent actions — creating, deleting, moving,
+  resizing, and recoloring notes, drawing/moving/resizing/deleting zones,
+  and Clear Board — replayed as a normal edit, so it updates the shared
+  board for everyone the same way making the edit did. It can't undo
+  someone else's edit, and text typed into a note relies on the browser's
+  own native undo for that note instead (see "Using it" above).
 - Concurrent edits to the *same* note's text are last-write-wins (a rare
   collision for a hobby tool, not worth more machinery here).
 - Images are embedded as inline data (not uploaded to separate storage),

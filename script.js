@@ -12,6 +12,8 @@
   const zoomInBtn = document.getElementById("zoomInBtn");
   const zoomOutBtn = document.getElementById("zoomOutBtn");
   const fitBtn = document.getElementById("fitBtn");
+  const undoBtn = document.getElementById("undoBtn");
+  const redoBtn = document.getElementById("redoBtn");
   const menuBtn = document.getElementById("menuBtn");
   const menuDrawer = document.getElementById("menuDrawer");
   const menuBackdrop = document.getElementById("menuBackdrop");
@@ -633,9 +635,11 @@
   }
 
   clearBtn.addEventListener("click", () => {
-    if (!confirm("Clear every note on this board for everyone? This can't be undone.")) return;
+    if (!confirm("Clear every note on this board for everyone?")) return;
+    const snapshot = [...notes.values()];
     clearAllNotes();
     MP.sendClear();
+    recordClear(snapshot);
     closeMenu();
   });
 
@@ -850,6 +854,7 @@
       e.stopPropagation();
       deleteNote(note.id);
       MP.sendDelete(note.id);
+      recordNoteDelete(note);
     });
 
     if (isImage) {
@@ -868,6 +873,7 @@
         // normalize that back to empty so the CSS placeholder shows again.
         if (editor.innerHTML === "<br>") editor.innerHTML = "";
         scheduleAutofit(note.id);
+        lastEditKind = "text";
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => sendHtmlUpdate(note.id), 400);
       });
@@ -1039,6 +1045,7 @@
       e.stopPropagation();
       deleteZone(zone.id);
       MP.sendZoneDelete(zone.id);
+      recordZoneDelete(zone);
     });
 
     zoneEls.set(zone.id, { el, header, labelEl });
@@ -1068,6 +1075,7 @@
     const zone = { id, x, y, w, h, label: clampZoneLabel(label), ...(extra || {}) };
     addZoneLocally(zone);
     MP.sendZoneCreate(zone);
+    recordZoneCreate(zone);
     return id;
   }
 
@@ -1104,6 +1112,212 @@
     positionZoneEl(data.id);
     refreshZoneFieldTint(data.id);
   }
+
+  // ---------- Undo / redo (this browser's own actions only) ----------
+  // There's no per-note history on the server -- a board is just current
+  // flat state (see the worker's README section) -- so "undo" here means a
+  // local stack of *this browser's own* create/delete/move/resize/recolor/
+  // clear actions, each paired with its inverse. Undoing one replays that
+  // inverse through the same MP.send* calls a live edit would use, so it
+  // updates the shared board for everyone, the same way the original edit
+  // did. What it can't do is undo somebody else's edit -- only your own.
+  const undoStack = [];
+  const redoStack = [];
+  const HISTORY_LIMIT = 100;
+
+  // A note stays contentEditable (and keeps the caret's focus) through a
+  // resize/recolor/delete done from its own header without ever blurring --
+  // so focus alone can't tell a board-level keyboard shortcut apart from
+  // "actually typing." This tracks which kind of thing happened *most
+  // recently* so mod+Z can defer to the browser's own text-undo only when
+  // that's really what the caret is sitting in the middle of.
+  let lastEditKind = null; // "text" | "board"
+
+  function pushHistory(entry) {
+    undoStack.push(entry);
+    if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+    redoStack.length = 0;
+    lastEditKind = "board";
+    updateUndoRedoButtons();
+  }
+
+  function undo() {
+    const entry = undoStack.pop();
+    if (!entry) return;
+    entry.undo();
+    redoStack.push(entry);
+    updateUndoRedoButtons();
+  }
+
+  function redo() {
+    const entry = redoStack.pop();
+    if (!entry) return;
+    entry.redo();
+    undoStack.push(entry);
+    updateUndoRedoButtons();
+  }
+
+  function updateUndoRedoButtons() {
+    if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+    if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+  }
+
+  // Recording helpers close over the live `note`/`zone` object itself
+  // (not a clone) -- deleteNote/deleteZone only remove it from the
+  // notes/zones Map, they never touch its properties, so the same
+  // reference is still good for a later redo. Any edits made to it between
+  // being recorded and being undone have their own, later history entries
+  // in front of this one on the stack, so by the time this entry's own
+  // undo actually runs, those later entries have already been undone and
+  // the object is back to the state it was in when this entry was pushed.
+  function recordNoteCreate(note) {
+    pushHistory({
+      undo: () => { deleteNote(note.id); MP.sendDelete(note.id); },
+      redo: () => { addNoteLocally(note); MP.sendCreate(note); },
+    });
+  }
+
+  function recordNoteDelete(note) {
+    pushHistory({
+      undo: () => { addNoteLocally(note); MP.sendCreate(note); },
+      redo: () => { deleteNote(note.id); MP.sendDelete(note.id); },
+    });
+  }
+
+  function setNotePosition(id, pos) {
+    const note = notes.get(id);
+    if (!note) return;
+    note.x = pos.x;
+    note.y = pos.y;
+    positionNoteEl(id);
+    MP.sendMove(id, note.x, note.y, note.z);
+  }
+
+  function recordNoteMove(id, before, after) {
+    pushHistory({
+      undo: () => setNotePosition(id, before),
+      redo: () => setNotePosition(id, after),
+    });
+  }
+
+  function setNoteSize(id, size) {
+    const note = notes.get(id);
+    const refs = noteEls.get(id);
+    if (!note) return;
+    note.w = size.w;
+    note.h = size.h;
+    if (refs) {
+      refs.el.style.width = note.w + "px";
+      refs.el.style.height = note.h + "px";
+    }
+    scheduleAutofit(id);
+    MP.sendUpdate(id, { w: note.w, h: note.h });
+  }
+
+  function recordNoteResize(id, before, after) {
+    pushHistory({
+      undo: () => setNoteSize(id, before),
+      redo: () => setNoteSize(id, after),
+    });
+  }
+
+  function recordNoteColor(id, before, after) {
+    pushHistory({
+      undo: () => setNoteColor(id, before),
+      redo: () => setNoteColor(id, after),
+    });
+  }
+
+  function recordClear(snapshot) {
+    pushHistory({
+      undo: () => {
+        for (const note of snapshot) {
+          addNoteLocally(note);
+          MP.sendCreate(note);
+        }
+      },
+      redo: () => { clearAllNotes(); MP.sendClear(); },
+    });
+  }
+
+  function recordZoneCreate(zone) {
+    pushHistory({
+      undo: () => { deleteZone(zone.id); MP.sendZoneDelete(zone.id); },
+      redo: () => { addZoneLocally(zone); MP.sendZoneCreate(zone); },
+    });
+  }
+
+  function recordZoneDelete(zone) {
+    pushHistory({
+      undo: () => { addZoneLocally(zone); MP.sendZoneCreate(zone); },
+      redo: () => { deleteZone(zone.id); MP.sendZoneDelete(zone.id); },
+    });
+  }
+
+  function setZonePosition(id, pos) {
+    const zone = zones.get(id);
+    if (!zone) return;
+    zone.x = pos.x;
+    zone.y = pos.y;
+    positionZoneEl(id);
+    MP.sendZoneMove(id, zone.x, zone.y);
+  }
+
+  function recordZoneMove(id, before, after) {
+    pushHistory({
+      undo: () => setZonePosition(id, before),
+      redo: () => setZonePosition(id, after),
+    });
+  }
+
+  function setZoneSize(id, size) {
+    const zone = zones.get(id);
+    const refs = zoneEls.get(id);
+    if (!zone) return;
+    zone.w = size.w;
+    zone.h = size.h;
+    if (refs) {
+      refs.el.style.width = zone.w + "px";
+      refs.el.style.height = zone.h + "px";
+    }
+    MP.sendZoneUpdate(id, { w: zone.w, h: zone.h });
+  }
+
+  function recordZoneResize(id, before, after) {
+    pushHistory({
+      undo: () => setZoneSize(id, before),
+      redo: () => setZoneSize(id, after),
+    });
+  }
+
+  // A mod+Z / mod+Shift+Z (or mod+Y) keystroke means the board-level undo
+  // above, with two exceptions where the browser's own native text-undo
+  // should run instead: a plain form field (identity name, field-manager
+  // text inputs, ...), always; and a note's own contentEditable body, but
+  // only when typing is actually the most recent thing that happened in it
+  // -- a note stays focused/editable through a resize, recolor, or header
+  // delete done without ever blurring it, and *that* shouldn't get eaten
+  // just because the caret happens to still be sitting in the text.
+  window.addEventListener("keydown", (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod) return;
+    const key = e.key.toLowerCase();
+    if (key !== "z" && key !== "y") return;
+    const target = e.target;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+    if (target && target.isContentEditable && lastEditKind === "text") return;
+    if (key === "y" || (key === "z" && e.shiftKey)) {
+      e.preventDefault();
+      redo();
+    } else {
+      e.preventDefault();
+      undo();
+    }
+  });
+
+  if (undoBtn) undoBtn.addEventListener("click", undo);
+  if (redoBtn) redoBtn.addEventListener("click", redo);
+  updateUndoRedoButtons();
 
   // ---------- Zone <-> note geometry (stacking, membership, collisions) ----------
   function zoneContentRect(zone) {
@@ -1481,7 +1695,10 @@
   colorPopover.addEventListener("click", (e) => {
     const btn = e.target.closest(".color-opt");
     if (!btn || !colorTargetId) return;
+    const note = notes.get(colorTargetId);
+    const before = note && note.color;
     setNoteColor(colorTargetId, btn.dataset.color);
+    if (note && before !== btn.dataset.color) recordNoteColor(colorTargetId, before, btn.dataset.color);
     closeColorPopover();
   });
 
@@ -2658,6 +2875,7 @@
     };
     addNoteLocally(note);
     MP.sendCreate(note);
+    recordNoteCreate(note);
     // A blank note is created for immediate typing, so it should go straight
     // into edit mode; a batch of notes from a photo scan shouldn't steal
     // focus/edit mode from any of them.
@@ -2703,6 +2921,7 @@
         };
         addNoteLocally(note);
         MP.sendCreate(note);
+        recordNoteCreate(note);
         resolve(id);
       };
       probe.onerror = () => resolve(null);
@@ -2870,6 +3089,7 @@
   let dragOffset = null;
   let dragMoved = false; // whether a note drag actually relocated it -- a plain click shouldn't trigger zone snapping
   let dragStartScreen = null; // screen coords at pointerdown, for the click-vs-drag threshold
+  let dragStartPos = null; // note's {x,y} at pointerdown, for an undo entry once the drag ends
   let dragEnterEditOnClick = false; // pointerdown landed on an already-selected, not-yet-editing note -- a plain click (no drag) enters edit mode
   let lastMoveSent = 0;
   let resizePointerId = null;
@@ -2878,6 +3098,7 @@
   let zoneDragPointerId = null;
   let zoneDragId = null;
   let zoneDragOffset = null;
+  let zoneDragStartPos = null; // zone's {x,y} at pointerdown, for an undo entry once the drag ends
   let zoneResizePointerId = null;
   let zoneResizeId = null;
   let zoneResizeStart = null;
@@ -2917,6 +3138,7 @@
     dragOffset = null;
     dragMoved = false;
     dragStartScreen = null;
+    dragStartPos = null;
     dragEnterEditOnClick = false;
     panPointerId = null;
     panAnchorWorld = null;
@@ -2926,6 +3148,7 @@
     zoneDragId = null;
     zoneDragPointerId = null;
     zoneDragOffset = null;
+    zoneDragStartPos = null;
     zoneResizeId = null;
     zoneResizePointerId = null;
     zoneResizeStart = null;
@@ -2996,6 +3219,7 @@
       dragPointerId = e.pointerId;
       dragMoved = false;
       dragStartScreen = { x: e.clientX, y: e.clientY };
+      dragStartPos = { x: note.x, y: note.y };
       dragEnterEditOnClick = !editing && wasAlreadySelected;
       e.preventDefault();
       return;
@@ -3011,6 +3235,7 @@
       zoneDragOffset = { x: world.x - zone.x, y: world.y - zone.y };
       zoneDragId = id;
       zoneDragPointerId = e.pointerId;
+      zoneDragStartPos = { x: zone.x, y: zone.y };
       e.preventDefault();
       return;
     }
@@ -3169,6 +3394,9 @@
       if (note) {
         if (dragMoved) {
           finalizeNoteDrop(dragNoteId, e.altKey);
+          if (dragStartPos && (note.x !== dragStartPos.x || note.y !== dragStartPos.y)) {
+            recordNoteMove(dragNoteId, dragStartPos, { x: note.x, y: note.y });
+          }
         } else {
           MP.sendMove(dragNoteId, note.x, note.y, note.z);
           if (dragEnterEditOnClick) enterEditMode(dragNoteId, e.clientX, e.clientY);
@@ -3181,11 +3409,17 @@
       dragOffset = null;
       dragMoved = false;
       dragStartScreen = null;
+      dragStartPos = null;
       dragEnterEditOnClick = false;
     }
     if (resizeNoteId && e.pointerId === resizePointerId) {
       const note = notes.get(resizeNoteId);
-      if (note) MP.sendUpdate(resizeNoteId, { w: Math.round(note.w), h: Math.round(note.h) });
+      if (note) {
+        MP.sendUpdate(resizeNoteId, { w: Math.round(note.w), h: Math.round(note.h) });
+        if (resizeStart && (note.w !== resizeStart.w || note.h !== resizeStart.h)) {
+          recordNoteResize(resizeNoteId, { w: resizeStart.w, h: resizeStart.h }, { w: note.w, h: note.h });
+        }
+      }
       resizeNoteId = null;
       resizePointerId = null;
       resizeStart = null;
@@ -3196,14 +3430,25 @@
     }
     if (zoneDragId && e.pointerId === zoneDragPointerId) {
       const zone = zones.get(zoneDragId);
-      if (zone) MP.sendZoneMove(zoneDragId, zone.x, zone.y);
+      if (zone) {
+        MP.sendZoneMove(zoneDragId, zone.x, zone.y);
+        if (zoneDragStartPos && (zone.x !== zoneDragStartPos.x || zone.y !== zoneDragStartPos.y)) {
+          recordZoneMove(zoneDragId, zoneDragStartPos, { x: zone.x, y: zone.y });
+        }
+      }
       zoneDragId = null;
       zoneDragPointerId = null;
       zoneDragOffset = null;
+      zoneDragStartPos = null;
     }
     if (zoneResizeId && e.pointerId === zoneResizePointerId) {
       const zone = zones.get(zoneResizeId);
-      if (zone) MP.sendZoneUpdate(zoneResizeId, { w: Math.round(zone.w), h: Math.round(zone.h) });
+      if (zone) {
+        MP.sendZoneUpdate(zoneResizeId, { w: Math.round(zone.w), h: Math.round(zone.h) });
+        if (zoneResizeStart && (zone.w !== zoneResizeStart.w || zone.h !== zoneResizeStart.h)) {
+          recordZoneResize(zoneResizeId, { w: zoneResizeStart.w, h: zoneResizeStart.h }, { w: zone.w, h: zone.h });
+        }
+      }
       zoneResizeId = null;
       zoneResizePointerId = null;
       zoneResizeStart = null;
