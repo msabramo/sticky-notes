@@ -228,6 +228,42 @@ body {
   background-size: 40px 40px;
 }
 
+.board-wrap.bg-snow {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.board-wrap.bg-linen {
+  background-color: #f2e2c4;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.board-wrap.bg-blush {
+  background-color: #fbe0e6;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.board-wrap.bg-plain-white {
+  background-color: #ffffff;
+}
+
+.board-wrap.bg-plain-tan {
+  background-color: #f2e2c4;
+}
+
+.board-wrap.bg-plain-pink {
+  background-color: #fbe0e6;
+}
+
 .board-wrap.bg-chalkboard {
   background-color: #22392b;
   background-image:
@@ -574,8 +610,10 @@ body {
   position: absolute;
   z-index: 5;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 8px;
+  width: 122px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1160,6 +1198,42 @@ body {
     linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
   background-size: 10px 10px;
+}
+
+.bg-preview-snow {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.bg-preview-linen {
+  background-color: #f2e2c4;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.bg-preview-blush {
+  background-color: #fbe0e6;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.bg-preview-plain-white {
+  background-color: #ffffff;
+}
+
+.bg-preview-plain-tan {
+  background-color: #f2e2c4;
+}
+
+.bg-preview-plain-pink {
+  background-color: #fbe0e6;
 }
 
 .bg-preview-chalkboard {
