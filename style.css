@@ -407,6 +407,18 @@ body {
 
 .board-wrap.drawing-zone { cursor: crosshair; }
 
+/* Shift-drag marquee for multi-selecting notes (see the boardWrap
+   pointerdown/pointermove/pointerup handlers in script.js). Sits above
+   notes/zones so it's visible while dragging over them. */
+.lasso-preview {
+  position: absolute;
+  z-index: 999999;
+  border: 1.5px dashed rgba(255, 255, 255, 0.85);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
 /* ---------- Sticky note ---------- */
 /* A note not being edited is a drag target everywhere on it (see the
    boardWrap pointerdown handler in script.js) -- grab/grabbing communicates

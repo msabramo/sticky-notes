@@ -58,6 +58,12 @@ same coordinate space, so notes always line up between devices.
 - **Move a note** — drag its colored header strip. (The body is for
   typing; only the header initiates a drag, so starting to type never
   fights with starting to drag.)
+- **Select multiple notes** — Ctrl/Cmd-click each note to add or remove it
+  from the selection, or hold Shift and drag across empty board space to
+  draw a lasso around a group. Drag any note in the selection to move them
+  all together, each still snapping into its own zone independently on
+  drop. Press **Delete**/**Backspace** to remove every selected note at
+  once (only while you're not actively typing in one).
 - **Edit text** — tap/click the note's body.
 - **Resize a note** — drag the small grip in its bottom-right corner.
 - **Recolor** — tap the ● button in a note's header for a small palette.
@@ -118,7 +124,8 @@ same coordinate space, so notes always line up between devices.
   Grid (the default dotted-grid look), Whiteboard, Chalkboard, or Pinboard
   (a linen/cork texture). It's shared board-wide state, just like the
   custom fields — everyone viewing the board sees the same one.
-- **Delete** — tap the × button in a note's header.
+- **Delete** — tap the × button in a note's header, or select one or more
+  notes (see "Select multiple notes" above) and press Delete/Backspace.
 - **Photo to notes** — tap 📷 (bottom-left, above **+**) to snap or pick a
   photo of a handwritten or printed to-do list; each item it finds
   becomes its own note, arranged in a grid at your current view.
